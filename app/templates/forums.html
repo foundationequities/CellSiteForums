@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Forums{% endblock %}
+{% block content %}
+<h1>Forums <span class="note">({{ forums|length }} configured)</span></h1>
+<p class="note">Seeded from <span class="mono">forums.json</span>. Disabled forums are skipped by scans; disable rather than delete, and record why in notes.</p>
+
+<div class="panel">
+<table>
+  <thead>
+    <tr>
+      <th>Forum</th><th>Type</th><th>Cat</th><th>Viability</th><th>Posts</th>
+      <th>Post?</th><th>Last scan</th><th>Status</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in forums %}
+    <tr>
+      <td>
+        {% if f.url %}<a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.name }}</a>{% else %}{{ f.name }}{% endif %}
+        <div class="note">{{ f.notes }}</div>
+        {% if f.posting_notes %}<div class="note warn">⚑ {{ f.posting_notes }}</div>{% endif %}
+      </td>
+      <td>{{ f.adapter_type }}</td>
+      <td><span class="badge badge-{{ f.category }}">{{ f.category }}</span></td>
+      <td class="v-{{ f.viability }}">{{ f.viability }}</td>
+      <td>{{ post_counts[f.id] }}</td>
+      <td>{{ '✓' if f.can_post else '—' }}</td>
+      <td>{{ f.last_scanned_at|dt }}<div class="note">{{ f.last_scan_status }}</div></td>
+      <td>{{ 'enabled' if f.enabled else 'disabled' }}</td>
+      <td>
+        <form class="inline" method="post" action="/forums/{{ f.id }}/toggle">
+          <button class="btn btn-sm" type="submit">{{ 'Disable' if f.enabled else 'Enable' }}</button>
+        </form>
+        <form class="inline" method="post" action="/forums/{{ f.id }}/scan">
+          <button class="btn btn-sm" type="submit">Scan</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+# ForumAgent — CellSite Solutions
+# Python 3.11+
+
+# Web framework + templating
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+python-multipart==0.0.20
+
+# Database
+SQLAlchemy==2.0.36
+
+# Fetching / parsing
+httpx==0.28.1
+beautifulsoup4==4.12.3
+feedparser==6.0.11
+lxml==5.3.0
+
+# Reddit
+praw==7.8.1
+
+# Scheduling
+APScheduler==3.11.0
+
+# Credential encryption
+cryptography==44.0.0
+
+# Config / env
+python-dotenv==1.0.1
+
+# Optional AI (app runs fully without an API key)
+anthropic==0.42.0
+
+# Dev / test
+pytest==8.3.4
+ruff==0.8.4

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Draft Reply{% endblock %}
+{% block content %}
+<p><a href="/">← Dashboard</a></p>
+<h1>Draft Reply</h1>
+
+<div class="panel">
+  <div class="card-head">
+    <span class="badge badge-{{ post.forum.category }}">{{ post.forum.category }}</span>
+    <h3 style="flex:1">{% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>{% else %}{{ post.title }}{% endif %}</h3>
+    <span class="score {{ post.score_band|band_class }}">{{ post.score }} · {{ post.score_band }}</span>
+  </div>
+  <div class="meta">{{ post.forum.name }} {% if post.author %}· {{ post.author }}{% endif %} · {{ post.posted_at|dt }}</div>
+  {% if post.body_excerpt %}<p class="excerpt">{{ post.body_excerpt | highlight(post.matched_keywords) | safe }}</p>{% endif %}
+</div>
+
+<div class="callout {{ 'callout-warn' if post.forum.posting_notes else '' }}">
+  <strong>Forum rules:</strong> {{ post.forum.posting_notes or 'None recorded.' }}
+</div>
+
+{% if assisted_only %}
+<div class="callout callout-warn">
+  <strong>Assisted posting only.</strong> This forum ({{ post.forum.adapter_type }}) is not posted to
+  programmatically{% if post.forum.adapter_type == 'manual' %} (LinkedIn automation is prohibited){% endif %}.
+  Approve your draft, click <em>Copy &amp; open thread</em>, then paste it into your own logged-in browser and mark it copied.
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Your reply</h2>
+
+  {% if ai_available %}
+  <form hx-post="/posts/{{ post.id }}/reply/ai-draft" hx-target="#draft-wrap" hx-swap="innerHTML" hx-indicator="#ai-spin" style="margin-bottom:0.6rem">
+    <div class="form-row">
+      <label>Optional guidance for the AI (tone, angle, what to emphasize)</label>
+      <input type="text" name="guidance" placeholder="e.g. keep it short, focus on lead times">
+    </div>
+    <button class="btn" type="submit">✨ Generate AI draft</button>
+    <span id="ai-spin" class="htmx-indicator note"> generating…</span>
+    <span class="note">Answers the question first; mentions CellSite at most once. Review before posting.</span>
+  </form>
+  {% else %}
+  <div class="callout">AI drafting is off (no <span class="mono">ANTHROPIC_API_KEY</span>). Write your reply manually below.</div>
+  {% endif %}
+
+  <form method="post" id="reply-form" action="/replies/{{ reply.id }}/save">
+    <div id="draft-wrap">
+      {% include "partials/draft_body.html" %}
+    </div>
+    <div class="card-actions" style="margin-top:0.7rem">
+      <button class="btn" type="submit" form="reply-form" formaction="/replies/{{ reply.id }}/save">Save draft</button>
+      <button class="btn btn-primary" type="submit" form="reply-form" formaction="/replies/{{ reply.id }}/approve">Approve</button>
+
+      {% if programmatic_posting %}
+      <span class="note">Status: <strong>{{ reply.status }}</strong></span>
+      {% else %}
+      <button class="btn" type="button" onclick="copyAndOpen()">Copy &amp; open thread</button>
+      <span class="note">Status: <strong>{{ reply.status }}</strong></span>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if programmatic_posting %}
+  <form method="post" action="/replies/{{ reply.id }}/post" style="margin-top:0.5rem">
+    <button class="btn btn-primary" type="submit" {% if reply.status != 'approved' %}disabled{% endif %}>
+      Post to {{ post.forum.name }}
+    </button>
+    <span class="note">{% if reply.status != 'approved' %}Approve the draft first — posting always requires the explicit approve step.{% else %}Ready to post.{% endif %}</span>
+  </form>
+  {% else %}
+  <form method="post" action="/replies/{{ reply.id }}/mark-copied" style="margin-top:0.5rem">
+    <button class="btn btn-primary" type="submit" {% if reply.status not in ('approved','manual_copied') %}disabled{% endif %}>Mark as manually posted</button>
+    <span class="note">Confirms you pasted the approved draft on the site.</span>
+  </form>
+  {% endif %}
+
+  {% if reply.status == 'posted' %}
+  <div class="callout"><strong>Posted.</strong> <a href="{{ reply.posted_url }}" target="_blank" rel="noopener">{{ reply.posted_url }}</a> at {{ reply.posted_at|dt }}</div>
+  {% elif reply.status == 'manual_copied' %}
+  <div class="callout"><strong>Marked as manually posted</strong> at {{ reply.posted_at|dt }}.</div>
+  {% elif reply.status == 'failed' %}
+  <div class="callout callout-warn"><strong>Post failed:</strong> {{ reply.error }}</div>
+  {% endif %}
+</div>
+
+<script>
+function copyAndOpen() {
+  var body = document.getElementById('reply-body').value;
+  navigator.clipboard.writeText(body).then(function() {
+    {% if post.url %}window.open("{{ post.url }}", "_blank");{% endif %}
+    alert("Draft copied to clipboard. Paste it into the thread in your browser, then click 'Mark as manually posted'.");
+  }, function() {
+    alert("Copy failed — select the text and copy manually.");
+  });
+}
+</script>
+{% endblock %}
