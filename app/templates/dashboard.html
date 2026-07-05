@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<div class="stats">
+  <div class="stat"><div class="n">{{ stats.total_all }}</div><div class="l">Posts tracked</div></div>
+  <div class="stat"><div class="n">{{ stats.total_recent }}</div><div class="l">Last {{ settings.lookback_days }} days</div></div>
+  <div class="stat"><div class="n">{{ stats.high }}</div><div class="l">High score</div></div>
+  <div class="stat"><div class="n">{{ stats.leads }}</div><div class="l">Leads marked</div></div>
+  {% for cat, n in stats.by_category.items() %}
+  <div class="stat"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></div>
+  {% endfor %}
+</div>
+
+<form class="filters" method="get" action="/">
+  <label>Forum
+    <select name="forum">
+      <option value="">All</option>
+      {% for f in forums %}<option value="{{ f.slug }}" {% if filters.forum == f.slug %}selected{% endif %}>{{ f.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Category
+    <select name="category">
+      <option value="">All</option>
+      {% for c in categories %}<option value="{{ c }}" {% if filters.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Score
+    <select name="band">
+      <option value="">All</option>
+      {% for b in bands %}<option value="{{ b }}" {% if filters.band == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Status
+    <select name="status">
+      <option value="">All</option>
+      {% for s in statuses %}<option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Search
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="title or excerpt…">
+  </label>
+  <button class="btn" type="submit">Filter</button>
+  <a class="btn" href="/">Reset</a>
+</form>
+
+{% include "partials/post_list.html" %}
+
+{% endblock %}

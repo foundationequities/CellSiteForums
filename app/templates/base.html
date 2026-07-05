@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ForumAgent{% endblock %} · CellSite Solutions</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/"><strong>ForumAgent</strong></a>
+      <span class="sub">CellSite Solutions</span>
+    </div>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/forums">Forums</a>
+      <a href="/settings">Settings</a>
+      <a href="/settings/accounts">Accounts</a>
+    </nav>
+    <div class="header-actions">
+      {% if not ai_available %}<span class="pill pill-muted" title="Set ANTHROPIC_API_KEY to enable AI">AI off</span>{% else %}<span class="pill pill-ok">AI on</span>{% endif %}
+      <form method="post" action="/scan" class="inline">
+        <button class="btn btn-primary" type="submit">Scan Now</button>
+      </form>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <span>Human-in-the-loop · no auto-posting · polite scraping · robots.txt respected</span>
+  </footer>
+</body>
+</html>

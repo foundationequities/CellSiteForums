@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+<h1>Accounts &amp; credentials</h1>
+
+{% if not master_key_set %}
+<div class="callout callout-warn">
+  <strong>No master key set.</strong> Credentials are Fernet-encrypted at rest and
+  require <span class="mono">FORUMAGENT_KEY</span>. Generate one:
+  <div class="mono">python -m app.main --generate-key</div>
+  Add it to your <span class="mono">.env</span> as <span class="mono">FORUMAGENT_KEY=…</span> and restart. Saving is disabled until then.
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Reddit (official API — script app)</h2>
+  <p class="note">
+    Create a <em>script</em> app at
+    <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noopener">reddit.com/prefs/apps</a>,
+    then enter the client id/secret plus the bot account's username &amp; password.
+    Unlocks all Reddit subreddits in one scan. Advisory: age the account ~30 days and build some karma before posting.
+  </p>
+  {% if creds.reddit %}
+  <div class="callout">
+    Stored as <span class="mono">u/{{ creds.reddit.masked.get('username','?') }}</span>
+    · secret {{ creds.reddit.masked.get('client_secret','') }}
+    · verify: <strong>{{ creds.reddit.verify_status }}</strong>
+    ({{ creds.reddit.last_verified_at|dt }})
+    <form class="inline" method="post" action="/accounts/reddit/verify"><button class="btn btn-sm" {% if not master_key_set %}disabled{% endif %}>Verify</button></form>
+  </div>
+  {% endif %}
+  <form method="post" action="/accounts/reddit">
+    <div class="form-grid">
+      <div class="form-row"><label>Client ID</label><input type="text" name="client_id" required></div>
+      <div class="form-row"><label>Client secret</label><input type="password" name="client_secret" required></div>
+      <div class="form-row"><label>Reddit username</label><input type="text" name="username" required></div>
+      <div class="form-row"><label>Reddit password</label><input type="password" name="password" required></div>
+      <div class="form-row"><label>User agent (optional)</label><input type="text" name="user_agent" placeholder="ForumAgent/1.0 by u/yourname"></div>
+    </div>
+    <button class="btn btn-primary" type="submit" {% if not master_key_set %}disabled{% endif %}>Save Reddit credentials</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Discourse — Telecom Hall</h2>
+  <p class="note">
+    Reading needs no credentials. To <em>post</em>, generate a user API key in your
+    Telecom Hall account (or ask an admin) and enter it with your username.
+  </p>
+  {% for f in discourse_forums %}
+  <div class="form-row"><strong>{{ f.name }}</strong> <span class="note">{{ f.posting_notes }}</span></div>
+  {% set fc = creds.forums.get(f.id) %}
+  {% if fc %}
+  <div class="callout">
+    key {{ fc.masked.get('api_key','') }} · user {{ fc.masked.get('api_username','') }}
+    · verify: <strong>{{ fc.verify_status }}</strong> ({{ fc.last_verified_at|dt }})
+    <form class="inline" method="post" action="/accounts/{{ fc.id }}/verify"><button class="btn btn-sm" {% if not master_key_set %}disabled{% endif %}>Verify</button></form>
+  </div>
+  {% endif %}
+  <form method="post" action="/accounts/forum/{{ f.id }}">
+    <div class="form-grid">
+      <div class="form-row"><label>API key</label><input type="password" name="api_key"></div>
+      <div class="form-row"><label>API username</label><input type="text" name="api_username"></div>
+    </div>
+    <button class="btn btn-primary" type="submit" {% if not master_key_set %}disabled{% endif %}>Save</button>
+  </form>
+  <hr style="border-color:var(--border)">
+  {% endfor %}
+</div>
+
+<div class="panel">
+  <h2>Scrape &amp; manual forums</h2>
+  <p class="note">
+    ContractorTalk, Broadband Forum, DSLReports, Spiceworks and all LinkedIn groups use
+    <strong>assisted posting only</strong> — the reply workflow copies your approved draft
+    to the clipboard and opens the thread; you paste and post from your own logged-in browser.
+    No credentials are stored here and no automation submits on these sites (per compliance rules).
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+<article class="card {{ post.score_band|band_class }}" id="post-{{ post.id }}">
+  <div class="card-head">
+    <span class="badge badge-{{ post.forum.category }}">{{ post.forum.category }}</span>
+    <h3>
+      {% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
+      {% else %}{{ post.title }}{% endif %}
+    </h3>
+    <span class="score {{ post.score_band|band_class }}">{{ post.score }} · {{ post.score_band }}</span>
+  </div>
+  <div class="meta">
+    {{ post.forum.name }}
+    {% if post.author %}· {{ post.author }}{% endif %}
+    · {{ post.posted_at|dt }}
+  </div>
+
+  {% if post.ai_summary %}
+  <div class="ai-summary">
+    <span class="tag">AI{% if post.ai_relevant is not none %} · {{ 'relevant' if post.ai_relevant else 'maybe not' }}{% endif %}</span>
+    {{ post.ai_summary }}
+  </div>
+  {% endif %}
+
+  {% if post.body_excerpt %}
+  <p class="excerpt">{{ post.body_excerpt[:600] | highlight(post.matched_keywords) | safe }}{% if post.body_excerpt|length > 600 %}…{% endif %}</p>
+  {% endif %}
+
+  {% if post.matched_keywords %}
+  <div class="kw-list">
+    {% for kw in post.matched_keywords %}<span class="kw">{{ kw.term }}{% if kw.count > 1 %} ×{{ kw.count }}{% endif %}</span>{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="card-actions">
+    <form class="inline" hx-post="/posts/{{ post.id }}/status" hx-target="#post-{{ post.id }}" hx-swap="outerHTML">
+      <input type="hidden" name="status" value="reviewed">
+      <button class="btn btn-sm" type="submit">Reviewed</button>
+    </form>
+    <form class="inline" hx-post="/posts/{{ post.id }}/status" hx-target="#post-{{ post.id }}" hx-swap="outerHTML">
+      <input type="hidden" name="status" value="lead">
+      <button class="btn btn-sm" type="submit">★ Lead</button>
+    </form>
+    <form class="inline" hx-post="/posts/{{ post.id }}/status" hx-target="#post-{{ post.id }}" hx-swap="outerHTML">
+      <input type="hidden" name="status" value="ignored">
+      <button class="btn btn-sm btn-danger" type="submit">Ignore</button>
+    </form>
+    <a class="btn btn-sm btn-primary" href="/posts/{{ post.id }}/reply">Draft Reply</a>
+    <span class="status-tag status-{{ post.status }}">{{ post.status }}</span>
+  </div>
+</article>
