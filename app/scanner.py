@@ -13,10 +13,12 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
+from datetime import datetime
+
 from . import drafting, scoring
 from .adapters import build_adapter
 from .credentials import get_reddit_credentials
-from .db import Forum, Post, session, utcnow, load_runtime_settings
+from .db import Forum, Post, session, set_setting, utcnow, load_runtime_settings
 
 logger = logging.getLogger("forumagent.scanner")
 
@@ -43,27 +45,35 @@ class ScanSummary:
         return sum(r.fetched for r in self.results)
 
 
-def _load_keyword_specs(db) -> tuple[list[scoring.KeywordSpec], list[str]]:
+def _load_keyword_specs(db) -> tuple[list[scoring.KeywordSpec], list[str], list[str]]:
     from .db import Keyword
 
     rows = db.scalars(select(Keyword).where(Keyword.enabled == True)).all()  # noqa: E712
     specs: list[scoring.KeywordSpec] = []
     boosters: list[str] = []
+    competitors: list[str] = []
     for kw in rows:
-        if kw.is_booster:
+        if kw.is_competitor:
+            competitors.append(kw.term)
+        elif kw.is_booster:
             boosters.append(kw.term)
         else:
             specs.append(scoring.KeywordSpec(term=kw.term, weight=kw.weight, category=kw.category))
-    return specs, boosters
+    return specs, boosters, competitors
 
 
-def scan_forum(db, forum: Forum, *, settings=None) -> ForumScanResult:
-    """Scan one forum, persist new scored posts. Returns a per-forum result."""
+def scan_forum(db, forum: Forum, *, settings=None, since: datetime | None = None) -> ForumScanResult:
+    """Scan one forum, persist new scored posts. Returns a per-forum result.
+
+    ``since`` overrides the lookback start (used for incremental scans). When
+    omitted, the full ``lookback_days`` window is used.
+    """
     settings = settings or load_runtime_settings(db)
     result = ForumScanResult(forum_slug=forum.slug)
-    since = utcnow() - timedelta(days=settings.lookback_days)
+    if since is None:
+        since = utcnow() - timedelta(days=settings.lookback_days)
 
-    specs, boosters = _load_keyword_specs(db)
+    specs, boosters, competitors = _load_keyword_specs(db)
 
     credentials = None
     if forum.adapter_type == "reddit":
@@ -109,8 +119,14 @@ def scan_forum(db, forum: Forum, *, settings=None) -> ForumScanResult:
             threshold_medium=settings.threshold_medium,
         )
 
-        # Noisy subs/forums: only keep posts that actually matched a keyword.
-        if require_match and not sr.matched:
+        # Competitive-intel: which tracked competitors are named in this post.
+        combined = f"{rp.title}\n{rp.body}"
+        matched_competitors = [
+            c for c in competitors if scoring.count_occurrences(c, combined) > 0
+        ]
+
+        # Noisy subs/forums: keep only posts that matched a keyword OR name a competitor.
+        if require_match and not sr.matched and not matched_competitors:
             continue
 
         post = Post(
@@ -124,6 +140,7 @@ def scan_forum(db, forum: Forum, *, settings=None) -> ForumScanResult:
             score=sr.score,
             score_band=sr.band,
             matched_keywords_json=json.dumps(sr.matched_as_dicts),
+            matched_competitors_json=json.dumps(matched_competitors),
             status="new",
         )
 
@@ -146,21 +163,27 @@ def scan_forum(db, forum: Forum, *, settings=None) -> ForumScanResult:
     return result
 
 
-def scan_all(only_enabled: bool = True) -> ScanSummary:
-    """Scan every (enabled) forum. Used by the scheduler and the 'Scan Now' button."""
+def scan_all(only_enabled: bool = True, since: datetime | None = None) -> ScanSummary:
+    """Scan every (enabled) forum. Used by the scheduler and the 'Scan Now' button.
+
+    ``since`` overrides the per-forum lookback start (incremental scans). The
+    completion time is recorded as the ``last_scan_at`` setting so future scans
+    can default to "since last scan".
+    """
     with session() as db:
         settings = load_runtime_settings(db)
         stmt = select(Forum)
         if only_enabled:
             stmt = stmt.where(Forum.enabled == True)  # noqa: E712
         forums = db.scalars(stmt).all()
-        results = [scan_forum(db, f, settings=settings) for f in forums]
+        results = [scan_forum(db, f, settings=settings, since=since) for f in forums]
+        set_setting(db, "last_scan_at", utcnow().isoformat())
     return ScanSummary(results=results)
 
 
-def scan_one(forum_id: int) -> ForumScanResult:
+def scan_one(forum_id: int, since: datetime | None = None) -> ForumScanResult:
     with session() as db:
         forum = db.get(Forum, forum_id)
         if forum is None:
             return ForumScanResult(forum_slug="?", error="Forum not found")
-        return scan_forum(db, forum)
+        return scan_forum(db, forum, since=since)

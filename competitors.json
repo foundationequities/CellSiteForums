@@ -1,0 +1,9 @@
+{
+  "comment": "Competitor shelter/enclosure manufacturers. A mention in a forum post is tracked as a competitive-intel signal (shown as clickable stats and filterable on the dashboard). Editable in Settings after first seed. Terms are matched case-insensitively, word-boundary aware.",
+  "competitors": [
+    "Fibrebond",
+    "Thermobond",
+    "VFP Inc",
+    "Sabre"
+  ]
+}

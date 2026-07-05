@@ -35,7 +35,7 @@
 
 <div class="panel">
   <h2>Keywords <span class="note">({{ keywords|length }})</span></h2>
-  <p class="note">Seeded from <span class="mono">keywords.json</span>; edits here persist to the DB. Boosters add +3 when they co-occur with a keyword match. Matching is case-insensitive, word-boundary aware, with simple plurals.</p>
+  <p class="note">Seeded from <span class="mono">keywords.json</span> (and competitors from <span class="mono">competitors.json</span>); edits here persist to the DB. Boosters add +3 when they co-occur with a keyword match. Competitors are tracked as competitive-intel signals (shown as dashboard stats), not scored. Matching is case-insensitive, word-boundary aware, with simple plurals.</p>
 
   <form method="post" action="/keywords/add" class="filters">
     <label>Term<input type="text" name="term" required></label>
@@ -46,7 +46,13 @@
         {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
       </select>
     </label>
-    <label>Booster?<input type="checkbox" name="is_booster" value="1"></label>
+    <label>Type
+      <select name="kind">
+        <option value="keyword">keyword</option>
+        <option value="booster">booster</option>
+        <option value="competitor">competitor</option>
+      </select>
+    </label>
     <button class="btn btn-primary" type="submit">Add</button>
   </form>
 
@@ -64,7 +70,7 @@
           </form>
         </td>
         <td>{{ kw.category }}</td>
-        <td>{{ 'booster' if kw.is_booster else 'keyword' }}</td>
+        <td>{{ 'competitor' if kw.is_competitor else ('booster' if kw.is_booster else 'keyword') }}</td>
         <td>{{ 'yes' if kw.enabled else 'no' }}</td>
         <td>
           <form class="inline" method="post" action="/keywords/{{ kw.id }}/delete">

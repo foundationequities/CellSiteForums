@@ -99,3 +99,34 @@ def test_scored_post_persists_band_and_keywords(temp_db, monkeypatch):
     assert post.score > 0
     assert post.score_band in ("HIGH", "MEDIUM", "LOW")
     assert any(kw["term"] == "telecom shelter" for kw in post.matched_keywords)
+
+
+def test_competitor_mentions_are_tracked(temp_db, monkeypatch):
+    from sqlalchemy import select
+    from app import scanner
+    from app.adapters.base import RawPost
+    from app.db import Forum, Post
+
+    raw = RawPost(
+        external_id="topic-99",
+        title="Comparing telecom shelter vendors",
+        url="https://example.com/t/99",
+        body="We got quotes from Fibrebond and Sabre for a prefab telecom shelter. Thoughts?",
+        posted_at=datetime.now(timezone.utc),
+    )
+
+    class StubAdapter:
+        def __init__(self, forum, credentials=None):
+            self.forum = forum
+
+        def fetch_recent(self, since):
+            return [raw]
+
+    monkeypatch.setattr(scanner, "build_adapter", lambda forum, credentials=None: StubAdapter(forum))
+
+    with temp_db.session() as s:
+        forum = s.scalar(select(Forum).where(Forum.slug == "telecom-hall"))
+        scanner.scan_forum(s, forum)
+        post = s.scalar(select(Post).where(Post.external_id == "topic-99"))
+    assert post is not None
+    assert set(post.matched_competitors) == {"Fibrebond", "Sabre"}

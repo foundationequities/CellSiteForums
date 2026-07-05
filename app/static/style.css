@@ -63,10 +63,29 @@ main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
 .stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
 .stat {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  padding: 0.7rem 1rem; min-width: 120px;
+  padding: 0.7rem 1rem; min-width: 120px; display: block; color: var(--text);
 }
+a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .stat .n { font-size: 1.4rem; font-weight: 700; }
 .stat .l { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+
+/* Competitive references row */
+.stats-competitor { gap: 0.6rem; margin-top: -0.4rem; }
+.stats-competitor .stat { min-width: 90px; padding: 0.55rem 0.8rem; }
+.stat-label { background: transparent; border: none; display: flex; align-items: center; min-width: 0; padding-left: 0; }
+.stat-label .l { color: var(--accent); }
+.stats-competitor a.stat .n { color: var(--muted); }
+.stats-competitor a.stat.stat-hit { border-color: var(--medium); }
+.stats-competitor a.stat.stat-hit .n { color: var(--medium); }
+
+/* Scan control panel */
+.scan-panel { padding: 0.75rem 1rem; }
+.scan-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.scan-info { display: flex; flex-direction: column; margin-right: auto; }
+.scan-controls .radio { display: flex; align-items: center; gap: 0.35rem; font-size: 0.86rem; color: var(--muted); }
+.scan-controls .radio input[type=number] { padding: 0.25rem 0.4rem; }
+.kw-competitor { color: var(--medium); border-color: var(--medium); }
+.kw-competitor:hover { text-decoration: none; background: rgba(245,158,11,0.15); }
 
 /* Filters */
 .filters {

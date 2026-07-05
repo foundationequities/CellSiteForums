@@ -72,6 +72,20 @@ def load_keywords() -> dict[str, Any]:
     return data
 
 
+# Fallback competitor list if competitors.json is missing (still user-editable in Settings).
+DEFAULT_COMPETITORS = ["Fibrebond", "Thermobond", "VFP Inc", "Sabre"]
+
+
+def load_competitors() -> list[str]:
+    """Load competitor names to track. Root-first, then config/, then defaults."""
+    path = _find_config_file("competitors.json")
+    if not path.exists():
+        return list(DEFAULT_COMPETITORS)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    names = data.get("competitors", [])
+    return names or list(DEFAULT_COMPETITORS)
+
+
 @dataclass
 class RuntimeSettings:
     """Effective settings, seeded from defaults and overridable in the DB."""

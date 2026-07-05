@@ -30,6 +30,12 @@
   </div>
   {% endif %}
 
+  {% if post.matched_competitors %}
+  <div class="kw-list">
+    {% for name in post.matched_competitors %}<a class="kw kw-competitor" href="/?competitor={{ name|urlencode }}">⚔ {{ name }}</a>{% endfor %}
+  </div>
+  {% endif %}
+
   <div class="card-actions">
     <form class="inline" hx-post="/posts/{{ post.id }}/status" hx-target="#post-{{ post.id }}" hx-swap="outerHTML">
       <input type="hidden" name="status" value="reviewed">

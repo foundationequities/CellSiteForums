@@ -3,13 +3,37 @@
 {% block content %}
 
 <div class="stats">
-  <div class="stat"><div class="n">{{ stats.total_all }}</div><div class="l">Posts tracked</div></div>
+  <a class="stat" href="/"><div class="n">{{ stats.total_all }}</div><div class="l">Posts tracked</div></a>
   <div class="stat"><div class="n">{{ stats.total_recent }}</div><div class="l">Last {{ settings.lookback_days }} days</div></div>
-  <div class="stat"><div class="n">{{ stats.high }}</div><div class="l">High score</div></div>
-  <div class="stat"><div class="n">{{ stats.leads }}</div><div class="l">Leads marked</div></div>
+  <a class="stat" href="/?band=HIGH"><div class="n">{{ stats.high }}</div><div class="l">High score</div></a>
+  <a class="stat" href="/?status=lead"><div class="n">{{ stats.leads }}</div><div class="l">Leads marked</div></a>
   {% for cat, n in stats.by_category.items() %}
-  <div class="stat"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></div>
+  <a class="stat" href="/?category={{ cat }}"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></a>
   {% endfor %}
+</div>
+
+{% if stats.competitors %}
+<div class="stats stats-competitor">
+  <div class="stat stat-label"><div class="l">Competitive<br>references</div></div>
+  {% for name, n in stats.competitors.items() %}
+  <a class="stat {{ 'stat-hit' if n else '' }}" href="/?competitor={{ name|urlencode }}">
+    <div class="n">{{ n }}</div><div class="l">{{ name }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="panel scan-panel">
+  <form method="post" action="/scan" class="scan-controls">
+    <div class="scan-info">
+      <strong>Scan Now</strong>
+      <span class="note">Last scan: {{ (last_scan_at|dt) if last_scan_at else 'never (first scan pulls the full window)' }}</span>
+    </div>
+    <label class="radio"><input type="radio" name="mode" value="since_last" checked> Since last scan</label>
+    <label class="radio"><input type="radio" name="mode" value="days"> Last
+      <input type="number" name="days" value="{{ settings.lookback_days }}" min="1" max="3650" style="width:5rem"> days</label>
+    <button class="btn btn-primary" type="submit">Scan Now</button>
+  </form>
 </div>
 
 <form class="filters" method="get" action="/">
@@ -35,6 +59,12 @@
     <select name="status">
       <option value="">All</option>
       {% for s in statuses %}<option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Competitor
+    <select name="competitor">
+      <option value="">All</option>
+      {% for name in stats.competitors.keys() %}<option value="{{ name }}" {% if filters.competitor == name %}selected{% endif %}>{{ name }}</option>{% endfor %}
     </select>
   </label>
   <label>Search

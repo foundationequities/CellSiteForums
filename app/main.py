@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -25,6 +25,7 @@ from .db import (
     Keyword,
     Post,
     Reply,
+    get_setting,
     init_db,
     load_runtime_settings,
     seed_all,
@@ -109,7 +110,7 @@ def _base_context(request: Request, db) -> dict:
 # --- Dashboard --------------------------------------------------------------
 
 
-def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", limit=200):
+def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", competitor="", limit=200):
     stmt = select(Post).join(Forum)
     if forum_slug:
         stmt = stmt.where(Forum.slug == forum_slug)
@@ -119,11 +120,17 @@ def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", li
         stmt = stmt.where(Post.score_band == band)
     if status:
         stmt = stmt.where(Post.status == status)
+    if competitor:
+        stmt = stmt.where(Post.matched_competitors_json.ilike(f'%"{competitor}"%'))
     if q:
         like = f"%{q}%"
         stmt = stmt.where((Post.title.ilike(like)) | (Post.body_excerpt.ilike(like)))
     stmt = stmt.order_by(Post.score.desc(), Post.posted_at.desc()).limit(limit)
     return db.scalars(stmt).all()
+
+
+# TRADES intentionally omitted from the stats tiles (still a valid category/filter).
+STAT_CATEGORIES = ["TOWER", "FIBER", "DATA"]
 
 
 def _stats(db):
@@ -133,19 +140,39 @@ def _stats(db):
     # posted_at can be null for some sources; also count those via fetched_at fallback.
     total_all = db.scalar(select(func.count(Post.id))) or 0
     by_cat = {}
-    for cat in CATEGORIES:
+    for cat in STAT_CATEGORIES:
         by_cat[cat] = db.scalar(
             select(func.count(Post.id)).join(Forum).where(Forum.category == cat)
         ) or 0
     leads = db.scalar(select(func.count(Post.id)).where(Post.status == "lead")) or 0
     high = db.scalar(select(func.count(Post.id)).where(Post.score_band == "HIGH")) or 0
+
+    # Competitive references: count posts mentioning each tracked competitor.
+    competitors = config.load_competitors()
+    comp_counts = {
+        name: db.scalar(
+            select(func.count(Post.id)).where(Post.matched_competitors_json.ilike(f'%"{name}"%'))
+        ) or 0
+        for name in competitors
+    }
     return {
         "total_recent": total,
         "total_all": total_all,
         "by_category": by_cat,
         "leads": leads,
         "high": high,
+        "competitors": comp_counts,
     }
+
+
+def _last_scan_at(db) -> datetime | None:
+    raw = get_setting(db, "last_scan_at", "")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -156,17 +183,24 @@ def dashboard(
     band: str = "",
     status: str = "",
     q: str = "",
+    competitor: str = "",
 ):
     with session() as db:
         ctx = _base_context(request, db)
-        posts = _query_posts(db, forum_slug=forum, category=category, band=band, status=status, q=q)
+        posts = _query_posts(
+            db, forum_slug=forum, category=category, band=band, status=status, q=q, competitor=competitor
+        )
         forums = db.scalars(select(Forum).order_by(Forum.name)).all()
         ctx.update(
             {
                 "posts": posts,
                 "forums": forums,
                 "stats": _stats(db),
-                "filters": {"forum": forum, "category": category, "band": band, "status": status, "q": q},
+                "last_scan_at": _last_scan_at(db),
+                "filters": {
+                    "forum": forum, "category": category, "band": band,
+                    "status": status, "q": q, "competitor": competitor,
+                },
             }
         )
         return templates.TemplateResponse("dashboard.html", ctx)
@@ -180,18 +214,41 @@ def partial_posts(
     band: str = "",
     status: str = "",
     q: str = "",
+    competitor: str = "",
 ):
     with session() as db:
-        posts = _query_posts(db, forum_slug=forum, category=category, band=band, status=status, q=q)
+        posts = _query_posts(
+            db, forum_slug=forum, category=category, band=band, status=status, q=q, competitor=competitor
+        )
         return templates.TemplateResponse(
             "partials/post_list.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
         )
 
 
+def _compute_since(db, mode: str, days: int) -> datetime | None:
+    """Resolve the lookback start for a Scan Now request.
+
+    - ``days``: explicit last-N-days window.
+    - ``since_last``: incremental — since the last completed scan; falls back to
+      the full lookback window on the very first scan.
+    """
+    settings = load_runtime_settings(db)
+    if mode == "days" and days > 0:
+        return utcnow() - timedelta(days=days)
+    last = _last_scan_at(db)
+    if last is not None:
+        return last
+    return utcnow() - timedelta(days=settings.lookback_days)
+
+
 @app.post("/scan", response_class=HTMLResponse)
-def scan_now(request: Request):
-    summary = scanner.scan_all()
-    logger.info("Manual scan: %s new posts.", summary.total_new)
+def scan_now(request: Request, mode: str = Form("since_last"), days: int = Form(0)):
+    with session() as db:
+        since = _compute_since(db, mode, days)
+    summary = scanner.scan_all(since=since)
+    logger.info(
+        "Manual scan (mode=%s, since=%s): %s new posts.", mode, since, summary.total_new
+    )
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -248,7 +305,9 @@ def scan_forum_now(forum_id: int):
 def settings_page(request: Request):
     with session() as db:
         ctx = _base_context(request, db)
-        keywords = db.scalars(select(Keyword).order_by(Keyword.is_booster, Keyword.weight.desc())).all()
+        keywords = db.scalars(
+            select(Keyword).order_by(Keyword.is_competitor, Keyword.is_booster, Keyword.weight.desc())
+        ).all()
         ctx.update({"keywords": keywords})
         return templates.TemplateResponse("settings.html", ctx)
 
@@ -272,11 +331,24 @@ def save_settings(
 
 
 @app.post("/keywords/add")
-def add_keyword(term: str = Form(...), weight: float = Form(1.0), category: str = Form(""), is_booster: str = Form("")):
+def add_keyword(
+    term: str = Form(...),
+    weight: float = Form(1.0),
+    category: str = Form(""),
+    kind: str = Form("keyword"),
+):
     with session() as db:
         term = term.strip()
         if term and not db.scalar(select(Keyword).where(Keyword.term == term)):
-            db.add(Keyword(term=term, weight=weight, category=category, is_booster=bool(is_booster)))
+            db.add(
+                Keyword(
+                    term=term,
+                    weight=weight,
+                    category="COMPETITOR" if kind == "competitor" else category,
+                    is_booster=(kind == "booster"),
+                    is_competitor=(kind == "competitor"),
+                )
+            )
             db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
