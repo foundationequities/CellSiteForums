@@ -132,6 +132,43 @@ and weights seed from `keywords.json` and are editable in **Settings** (persiste
 
 ---
 
+## Opportunity intelligence (USA focus, intuition context, E911)
+
+Beyond raw keyword scoring, the agent adds context:
+
+- **Post topics as tabs.** Every post is tagged with topics derived from the categories of
+  the keywords it matched — **TOWER / FIBER / DATA / E911** show as clickable stat tabs
+  (TRADES stays a valid topic/filter). Tabs reflect what a *post* is about, not just which
+  forum it came from. E911/NG911 dispatch-center and PSAP terms are seeded in
+  `keywords.json`.
+
+- **USA-only focus.** Each post gets a geography tag (`USA` / `NON_USA` / `UNKNOWN`). With
+  **USA only** enabled in Settings (default on), posts identified as non-U.S. are heavily
+  down-weighted, badged **non-US**, and sink to the bottom — they stay visible for
+  reference but out of your way. Detection uses a keyword geo-heuristic (US states, FCC,
+  BEAD, RDOF … vs Ofcom, Openreach, NBN, £/€ …), upgraded to an AI judgment when a key is set.
+
+- **Intuition context (Settings → AI intuition & context).** A free-text box describing your
+  ideal opportunity. When `ANTHROPIC_API_KEY` is set, this steers the AI to read each post
+  for intent and classify **opportunity type**:
+  - **direct** — explicitly seeking/spec'ing a fiber hut, telecom/equipment shelter, or
+    modular data-center building;
+  - **related** — a utility, electric co-op, ISP, carrier, or agency expanding fiber /
+    FTTH / middle-mile / small-cell / E911 infrastructure that will *likely need* a
+    structure soon, even if not stated;
+  - **none**.
+
+  The **Direct opps** and **Related opps** stat tiles and the **Opportunity** filter surface
+  these. Without an API key the app falls back to a heuristic (HIGH→direct, MEDIUM→related)
+  and the geo-heuristic above, so it still runs fully offline of any AI.
+
+The context is pre-seeded with CellSite's profile (fiber huts, telecom shelters, modular
+buildings, latent demand from fiber/utility expansion and E911) — edit it any time to
+re-focus what the agent treats as important. New context/settings apply to newly scanned
+posts, so re-scan after changing them.
+
+---
+
 ## Adding or changing a forum
 
 Forums seed from **`forums.json`** (repo root). Each entry:

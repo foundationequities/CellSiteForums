@@ -115,6 +115,13 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .badge-FIBER { background: rgba(6,182,212,0.18); color: #67e8f9; }
 .badge-DATA { background: rgba(168,85,247,0.18); color: #d8b4fe; }
 .badge-TRADES { background: rgba(249,115,22,0.18); color: #fdba74; }
+.badge-E911 { background: rgba(34,197,94,0.18); color: #86efac; }
+.badge-opp { text-transform: uppercase; letter-spacing: 0.03em; }
+.badge-opp-direct { background: var(--ok); color: #05240f; }
+.badge-opp-related { background: rgba(34,197,94,0.22); color: #86efac; }
+.badge-nonus { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.stats-topic { gap: 0.6rem; margin-top: -0.4rem; }
+.stats-topic .stat { min-width: 84px; padding: 0.55rem 0.8rem; }
 .score { font-weight: 700; font-size: 0.9rem; }
 .score.band-high { color: var(--high); }
 .score.band-medium { color: var(--medium); }

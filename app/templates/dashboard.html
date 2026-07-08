@@ -4,9 +4,15 @@
 
 <div class="stats">
   <a class="stat" href="/"><div class="n">{{ stats.total_all }}</div><div class="l">Posts tracked</div></a>
-  <div class="stat"><div class="n">{{ stats.total_recent }}</div><div class="l">Last {{ settings.lookback_days }} days</div></div>
   <a class="stat" href="/?band=HIGH"><div class="n">{{ stats.high }}</div><div class="l">High score</div></a>
+  <a class="stat" href="/?opportunity=direct"><div class="n">{{ stats.by_opportunity.direct if stats.by_opportunity else '' }}</div><div class="l">Direct opps</div></a>
+  <a class="stat" href="/?opportunity=related"><div class="n">{{ stats.by_opportunity.related if stats.by_opportunity else '' }}</div><div class="l">Related opps</div></a>
   <a class="stat" href="/?status=lead"><div class="n">{{ stats.leads }}</div><div class="l">Leads marked</div></a>
+  {% if stats.non_usa %}<a class="stat" href="/?geo=NON_USA"><div class="n">{{ stats.non_usa }}</div><div class="l">Non-US (deprioritized)</div></a>{% endif %}
+</div>
+
+<div class="stats stats-topic">
+  <div class="stat stat-label"><div class="l">Topics</div></div>
   {% for cat, n in stats.by_category.items() %}
   <a class="stat" href="/?category={{ cat }}"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></a>
   {% endfor %}
@@ -55,6 +61,18 @@
     <select name="band">
       <option value="">All</option>
       {% for b in bands %}<option value="{{ b }}" {% if filters.band == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Opportunity
+    <select name="opportunity">
+      <option value="">All</option>
+      {% for o in opportunities %}<option value="{{ o }}" {% if filters.opportunity == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Geography
+    <select name="geo">
+      <option value="">All</option>
+      {% for g in geos %}<option value="{{ g }}" {% if filters.geo == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
     </select>
   </label>
   <label>Status

@@ -83,6 +83,9 @@ class Post(Base):
     score_band: Mapped[str] = mapped_column(String(10), default="LOW")  # HIGH/MEDIUM/LOW
     matched_keywords_json: Mapped[str] = mapped_column(Text, default="[]")
     matched_competitors_json: Mapped[str] = mapped_column(Text, default="[]")
+    topics_json: Mapped[str] = mapped_column(Text, default="[]")
+    geo: Mapped[str] = mapped_column(String(12), default="UNKNOWN", index=True)  # USA/NON_USA/UNKNOWN
+    opportunity_type: Mapped[str] = mapped_column(String(12), default="", index=True)  # direct/related/none
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_relevant: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="new", index=True)  # new/reviewed/lead/ignored
@@ -101,6 +104,13 @@ class Post(Base):
     def matched_competitors(self) -> list[str]:
         try:
             return json.loads(self.matched_competitors_json or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    @property
+    def topics(self) -> list[str]:
+        try:
+            return json.loads(self.topics_json or "[]")
         except json.JSONDecodeError:
             return []
 
@@ -198,6 +208,12 @@ def _run_lightweight_migrations() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE posts ADD COLUMN matched_competitors_json TEXT DEFAULT '[]'"
             )
+        if "topics_json" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN topics_json TEXT DEFAULT '[]'")
+        if "geo" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN geo VARCHAR(12) DEFAULT 'UNKNOWN'")
+        if "opportunity_type" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN opportunity_type VARCHAR(12) DEFAULT ''")
         kw_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(keywords)").fetchall()}
         if "is_competitor" not in kw_cols:
             conn.exec_driver_sql(

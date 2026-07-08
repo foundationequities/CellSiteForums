@@ -40,9 +40,11 @@ logger = logging.getLogger("forumagent")
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-CATEGORIES = ["TOWER", "FIBER", "DATA", "TRADES"]
+CATEGORIES = config.CATEGORIES  # TOWER/FIBER/DATA/E911/TRADES
 BANDS = ["HIGH", "MEDIUM", "LOW"]
 STATUSES = ["new", "reviewed", "lead", "ignored"]
+GEOS = ["USA", "NON_USA", "UNKNOWN"]
+OPPORTUNITIES = ["direct", "related", "none"]
 
 
 @asynccontextmanager
@@ -104,24 +106,34 @@ def _base_context(request: Request, db) -> dict:
         "categories": CATEGORIES,
         "bands": BANDS,
         "statuses": STATUSES,
+        "geos": GEOS,
+        "opportunities": OPPORTUNITIES,
     }
 
 
 # --- Dashboard --------------------------------------------------------------
 
 
-def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", competitor="", limit=200):
+def _query_posts(
+    db, *, forum_slug="", category="", band="", status="", q="", competitor="",
+    geo="", opportunity="", limit=200,
+):
     stmt = select(Post).join(Forum)
     if forum_slug:
         stmt = stmt.where(Forum.slug == forum_slug)
     if category:
-        stmt = stmt.where(Forum.category == category)
+        # Category tabs are POST-topic based (from matched keyword categories).
+        stmt = stmt.where(Post.topics_json.ilike(f'%"{category}"%'))
     if band:
         stmt = stmt.where(Post.score_band == band)
     if status:
         stmt = stmt.where(Post.status == status)
     if competitor:
         stmt = stmt.where(Post.matched_competitors_json.ilike(f'%"{competitor}"%'))
+    if geo:
+        stmt = stmt.where(Post.geo == geo)
+    if opportunity:
+        stmt = stmt.where(Post.opportunity_type == opportunity)
     if q:
         like = f"%{q}%"
         stmt = stmt.where((Post.title.ilike(like)) | (Post.body_excerpt.ilike(like)))
@@ -129,8 +141,8 @@ def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", co
     return db.scalars(stmt).all()
 
 
-# TRADES intentionally omitted from the stats tiles (still a valid category/filter).
-STAT_CATEGORIES = ["TOWER", "FIBER", "DATA"]
+# TRADES intentionally omitted from the stat tabs (still a valid topic/filter).
+STAT_CATEGORIES = config.TAB_CATEGORIES  # TOWER/FIBER/DATA/E911
 
 
 def _stats(db):
@@ -142,10 +154,15 @@ def _stats(db):
     by_cat = {}
     for cat in STAT_CATEGORIES:
         by_cat[cat] = db.scalar(
-            select(func.count(Post.id)).join(Forum).where(Forum.category == cat)
+            select(func.count(Post.id)).where(Post.topics_json.ilike(f'%"{cat}"%'))
         ) or 0
     leads = db.scalar(select(func.count(Post.id)).where(Post.status == "lead")) or 0
     high = db.scalar(select(func.count(Post.id)).where(Post.score_band == "HIGH")) or 0
+    non_usa = db.scalar(select(func.count(Post.id)).where(Post.geo == "NON_USA")) or 0
+    by_opp = {
+        opp: db.scalar(select(func.count(Post.id)).where(Post.opportunity_type == opp)) or 0
+        for opp in ("direct", "related")
+    }
 
     # Competitive references: count posts mentioning each tracked competitor.
     competitors = config.load_competitors()
@@ -161,6 +178,8 @@ def _stats(db):
         "by_category": by_cat,
         "leads": leads,
         "high": high,
+        "non_usa": non_usa,
+        "by_opportunity": by_opp,
         "competitors": comp_counts,
     }
 
@@ -184,11 +203,14 @@ def dashboard(
     status: str = "",
     q: str = "",
     competitor: str = "",
+    geo: str = "",
+    opportunity: str = "",
 ):
     with session() as db:
         ctx = _base_context(request, db)
         posts = _query_posts(
-            db, forum_slug=forum, category=category, band=band, status=status, q=q, competitor=competitor
+            db, forum_slug=forum, category=category, band=band, status=status, q=q,
+            competitor=competitor, geo=geo, opportunity=opportunity,
         )
         forums = db.scalars(select(Forum).order_by(Forum.name)).all()
         ctx.update(
@@ -201,6 +223,7 @@ def dashboard(
                 "filters": {
                     "forum": forum, "category": category, "band": band,
                     "status": status, "q": q, "competitor": competitor,
+                    "geo": geo, "opportunity": opportunity,
                 },
             }
         )
@@ -216,10 +239,13 @@ def partial_posts(
     status: str = "",
     q: str = "",
     competitor: str = "",
+    geo: str = "",
+    opportunity: str = "",
 ):
     with session() as db:
         posts = _query_posts(
-            db, forum_slug=forum, category=category, band=band, status=status, q=q, competitor=competitor
+            db, forum_slug=forum, category=category, band=band, status=status, q=q,
+            competitor=competitor, geo=geo, opportunity=opportunity,
         )
         return templates.TemplateResponse(
             "partials/post_cards.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
@@ -320,7 +346,13 @@ def settings_page(request: Request):
         keywords = db.scalars(
             select(Keyword).order_by(Keyword.is_competitor, Keyword.is_booster, Keyword.weight.desc())
         ).all()
-        ctx.update({"keywords": keywords})
+        ctx.update(
+            {
+                "keywords": keywords,
+                "ai_context": get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT),
+                "usa_only": get_setting(db, "usa_only", "1") == "1",
+            }
+        )
         return templates.TemplateResponse("settings.html", ctx)
 
 
@@ -331,6 +363,7 @@ def save_settings(
     recency_half_life_days: int = Form(...),
     threshold_high: float = Form(...),
     threshold_medium: float = Form(...),
+    usa_only: str = Form(""),
 ):
     with session() as db:
         set_setting(db, "lookback_days", str(lookback_days))
@@ -338,7 +371,15 @@ def save_settings(
         set_setting(db, "recency_half_life_days", str(recency_half_life_days))
         set_setting(db, "threshold_high", str(threshold_high))
         set_setting(db, "threshold_medium", str(threshold_medium))
+        set_setting(db, "usa_only", "1" if usa_only else "0")
     scheduler.reschedule(scan_interval_hours)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@app.post("/settings/context")
+def save_context(ai_context: str = Form("")):
+    with session() as db:
+        set_setting(db, "ai_context", ai_context.strip())
     return RedirectResponse(url="/settings", status_code=303)
 
 
@@ -582,8 +623,9 @@ def ai_draft(request: Request, post_id: int, guidance: str = Form("")):
     with session() as db:
         post = db.get(Post, post_id)
         forum = db.get(Forum, post.forum_id)
+        ai_context = get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT)
         draft = drafting.draft_reply(
-            post.title, post.body_excerpt, forum.name, forum.posting_notes, guidance
+            post.title, post.body_excerpt, forum.name, forum.posting_notes, guidance, ai_context
         )
         reply = _get_or_create_reply(db, post_id)
         reply.draft_body = draft

@@ -14,12 +14,15 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from . import drafting, scoring
+from . import config, drafting, scoring
 from .adapters import build_adapter
 from .credentials import get_reddit_credentials
-from .db import Forum, Post, session, set_setting, utcnow, load_runtime_settings
+from .db import Forum, Post, get_setting, session, set_setting, utcnow, load_runtime_settings
 
 logger = logging.getLogger("forumagent.scanner")
+
+# How hard to down-weight a post identified as non-U.S. when USA-only is on.
+NON_US_PENALTY = 0.15
 
 # --- Background scan state (so the UI never blocks on a long scan) -----------
 
@@ -120,6 +123,9 @@ def scan_forum(db, forum: Forum, *, settings=None, since: datetime | None = None
         since = utcnow() - timedelta(days=settings.lookback_days)
 
     specs, boosters, competitors = _load_keyword_specs(db)
+    us_signals, non_us_signals = config.load_geo_signals()
+    ai_context = get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT)
+    usa_only = get_setting(db, "usa_only", "1") == "1"
 
     credentials = None
     if forum.adapter_type == "reddit":
@@ -175,6 +181,29 @@ def scan_forum(db, forum: Forum, *, settings=None, since: datetime | None = None
         if require_match and not sr.matched and not matched_competitors:
             continue
 
+        # AI opportunity analysis (optional) on the more promising posts. Uses the
+        # operator's editable "intuition" context to infer direct vs latent demand.
+        classification = None
+        if drafting.ai_available() and sr.band in ("HIGH", "MEDIUM"):
+            classification = drafting.classify_post(rp.title, rp.body, forum.name, context=ai_context)
+
+        # Geography: heuristic, overridden by AI when it has a verdict.
+        geo = scoring.usa_geography(combined, us_signals, non_us_signals)
+        if classification is not None and classification.is_usa is not None:
+            geo = scoring.GEO_USA if classification.is_usa else scoring.GEO_NON_USA
+
+        # USA-only focus: heavily down-weight anything clearly non-U.S.
+        score = sr.score
+        if usa_only and geo == scoring.GEO_NON_USA:
+            score = round(score * NON_US_PENALTY, 2)
+        band = scoring.band_for_score(score, settings.threshold_high, settings.threshold_medium)
+
+        # Opportunity type: AI verdict, else derived from the (adjusted) band.
+        if classification is not None and classification.opportunity_type:
+            opportunity_type = classification.opportunity_type
+        else:
+            opportunity_type = {"HIGH": "direct", "MEDIUM": "related"}.get(band, "none")
+
         post = Post(
             forum_id=forum.id,
             external_id=rp.external_id,
@@ -183,19 +212,18 @@ def scan_forum(db, forum: Forum, *, settings=None, since: datetime | None = None
             author=rp.author[:200],
             body_excerpt=rp.body[:1500],
             posted_at=rp.posted_at,
-            score=sr.score,
-            score_band=sr.band,
+            score=score,
+            score_band=band,
             matched_keywords_json=json.dumps(sr.matched_as_dicts),
             matched_competitors_json=json.dumps(matched_competitors),
+            topics_json=json.dumps(sr.topics),
+            geo=geo,
+            opportunity_type=opportunity_type,
             status="new",
         )
-
-        # Optional AI classification for MEDIUM+ posts.
-        if drafting.ai_available() and sr.band in ("HIGH", "MEDIUM"):
-            classification = drafting.classify_post(rp.title, rp.body, forum.name)
-            if classification is not None:
-                post.ai_summary = classification.one_line_summary
-                post.ai_relevant = classification.relevant
+        if classification is not None:
+            post.ai_summary = classification.one_line_summary
+            post.ai_relevant = classification.relevant
 
         db.add(post)
         result.new_posts += 1

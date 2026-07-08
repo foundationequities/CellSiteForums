@@ -130,3 +130,42 @@ def test_competitor_mentions_are_tracked(temp_db, monkeypatch):
         post = s.scalar(select(Post).where(Post.external_id == "topic-99"))
     assert post is not None
     assert set(post.matched_competitors) == {"Fibrebond", "Sabre"}
+
+
+def test_topics_and_non_us_downweight(temp_db, monkeypatch):
+    from sqlalchemy import select
+    from app import scanner
+    from app.adapters.base import RawPost
+    from app.db import Forum, Post
+
+    us_raw = RawPost(
+        external_id="us-1", title="Fiber hut RFP in rural Texas (BEAD)",
+        url="https://x/us", body="Seeking a fiber hut vendor for a BEAD build in Texas. Quote please.",
+        posted_at=datetime.now(timezone.utc),
+    )
+    uk_raw = RawPost(
+        external_id="uk-1", title="Fiber hut RFP in the United Kingdom",
+        url="https://x/uk", body="Openreach project in the United Kingdom needs a fiber hut. Quote please.",
+        posted_at=datetime.now(timezone.utc),
+    )
+
+    class StubAdapter:
+        def __init__(self, forum, credentials=None):
+            self.forum = forum
+
+        def fetch_recent(self, since):
+            return [us_raw, uk_raw]
+
+    monkeypatch.setattr(scanner, "build_adapter", lambda forum, credentials=None: StubAdapter(forum))
+
+    with temp_db.session() as s:
+        forum = s.scalar(select(Forum).where(Forum.slug == "telecom-hall"))
+        scanner.scan_forum(s, forum)
+        us = s.scalar(select(Post).where(Post.external_id == "us-1"))
+        uk = s.scalar(select(Post).where(Post.external_id == "uk-1"))
+
+    assert "FIBER" in us.topics
+    assert us.geo == "USA"
+    assert uk.geo == "NON_USA"
+    # USA-only is on by default -> the non-US post is heavily down-weighted.
+    assert uk.score < us.score
