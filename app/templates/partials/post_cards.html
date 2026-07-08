@@ -1,0 +1,10 @@
+{% if posts %}
+  {% for post in posts %}
+    {% include "partials/post_card.html" %}
+  {% endfor %}
+{% else %}
+  <div class="empty">
+    No posts match yet. Use <strong>Scan Now</strong> above to pull the last
+    {{ settings.lookback_days if settings else 60 }} days.
+  </div>
+{% endif %}

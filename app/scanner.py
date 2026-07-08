@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
-
-from datetime import datetime
 
 from . import drafting, scoring
 from .adapters import build_adapter
@@ -21,6 +20,53 @@ from .credentials import get_reddit_credentials
 from .db import Forum, Post, session, set_setting, utcnow, load_runtime_settings
 
 logger = logging.getLogger("forumagent.scanner")
+
+# --- Background scan state (so the UI never blocks on a long scan) -----------
+
+_scan_lock = threading.Lock()
+_scan_state: dict = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "new_posts": 0,
+    "fetched": 0,
+    "error": "",
+}
+
+
+def scan_status() -> dict:
+    with _scan_lock:
+        return dict(_scan_state)
+
+
+def _background_scan(since: datetime | None) -> None:
+    try:
+        summary = scan_all(since=since)
+        with _scan_lock:
+            _scan_state.update(
+                running=False,
+                finished_at=utcnow(),
+                new_posts=summary.total_new,
+                fetched=summary.total_fetched,
+                error="",
+            )
+        logger.info("Background scan finished: %s new posts.", summary.total_new)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Background scan failed: %s", exc)
+        with _scan_lock:
+            _scan_state.update(running=False, finished_at=utcnow(), error=str(exc)[:300])
+
+
+def start_scan(since: datetime | None = None) -> bool:
+    """Kick off a scan in a daemon thread. Returns False if one is already running."""
+    with _scan_lock:
+        if _scan_state["running"]:
+            return False
+        _scan_state.update(
+            running=True, started_at=utcnow(), finished_at=None, new_posts=0, fetched=0, error=""
+        )
+    threading.Thread(target=_background_scan, args=(since,), daemon=True).start()
+    return True
 
 
 @dataclass

@@ -24,7 +24,8 @@
 {% endif %}
 
 <div class="panel scan-panel">
-  <form method="post" action="/scan" class="scan-controls">
+  <form method="post" action="/scan" class="scan-controls"
+        hx-post="/scan" hx-target="#scan-status-box" hx-swap="outerHTML">
     <div class="scan-info">
       <strong>Scan Now</strong>
       <span class="note">Last scan: {{ (last_scan_at|dt) if last_scan_at else 'never (first scan pulls the full window)' }}</span>
@@ -34,6 +35,7 @@
       <input type="number" name="days" value="{{ settings.lookback_days }}" min="1" max="3650" style="width:5rem"> days</label>
     <button class="btn btn-primary" type="submit">Scan Now</button>
   </form>
+  {% include "partials/scan_status.html" %}
 </div>
 
 <form class="filters" method="get" action="/">

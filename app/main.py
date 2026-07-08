@@ -196,6 +196,7 @@ def dashboard(
                 "posts": posts,
                 "forums": forums,
                 "stats": _stats(db),
+                "status": scanner.scan_status(),
                 "last_scan_at": _last_scan_at(db),
                 "filters": {
                     "forum": forum, "category": category, "band": band,
@@ -221,7 +222,7 @@ def partial_posts(
             db, forum_slug=forum, category=category, band=band, status=status, q=q, competitor=competitor
         )
         return templates.TemplateResponse(
-            "partials/post_list.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
+            "partials/post_cards.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
         )
 
 
@@ -245,11 +246,22 @@ def _compute_since(db, mode: str, days: int) -> datetime | None:
 def scan_now(request: Request, mode: str = Form("since_last"), days: int = Form(0)):
     with session() as db:
         since = _compute_since(db, mode, days)
-    summary = scanner.scan_all(since=since)
-    logger.info(
-        "Manual scan (mode=%s, since=%s): %s new posts.", mode, since, summary.total_new
-    )
+    started = scanner.start_scan(since=since)
+    logger.info("Scan requested (mode=%s, since=%s): started=%s", mode, since, started)
+    # HTMX request (dashboard panel) -> return the live status; the scan runs in
+    # the background so the browser never blocks. Plain form (header button) -> redirect.
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+        )
     return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/partials/scan-status", response_class=HTMLResponse)
+def scan_status_partial(request: Request):
+    return templates.TemplateResponse(
+        "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+    )
 
 
 @app.post("/posts/{post_id}/status", response_class=HTMLResponse)
