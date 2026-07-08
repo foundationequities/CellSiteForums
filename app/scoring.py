@@ -49,6 +49,7 @@ class ScoreResult:
     band: str
     matched: list[MatchedKeyword] = field(default_factory=list)
     boosters_hit: list[str] = field(default_factory=list)
+    topics: list[str] = field(default_factory=list)
 
     @property
     def matched_as_dicts(self) -> list[dict]:
@@ -114,6 +115,7 @@ def score_text(
     body = body or ""
 
     matched: list[MatchedKeyword] = []
+    topics: set[str] = set()
     keyword_score = 0.0
 
     for spec in keywords:
@@ -127,6 +129,8 @@ def score_text(
         # Title bonus: title occurrences count double (add their weight once more).
         title_bonus = spec.weight * min(occ_title, PER_KEYWORD_CAP) * (TITLE_MULTIPLIER - 1)
         keyword_score += contribution + title_bonus
+        if spec.category:
+            topics.add(spec.category)
         matched.append(
             MatchedKeyword(
                 term=spec.term,
@@ -137,7 +141,7 @@ def score_text(
         )
 
     if not matched:
-        return ScoreResult(score=0.0, band="LOW", matched=[], boosters_hit=[])
+        return ScoreResult(score=0.0, band="LOW", matched=[], boosters_hit=[], topics=[])
 
     # Buying-signal boosters: flat bonus if any co-occur with a keyword match.
     combined = f"{title}\n{body}"
@@ -156,7 +160,9 @@ def score_text(
     else:
         band = "LOW"
 
-    return ScoreResult(score=score, band=band, matched=matched, boosters_hit=boosters_hit)
+    return ScoreResult(
+        score=score, band=band, matched=matched, boosters_hit=boosters_hit, topics=sorted(topics)
+    )
 
 
 def band_for_score(score: float, threshold_high: float, threshold_medium: float) -> str:
@@ -165,3 +171,33 @@ def band_for_score(score: float, threshold_high: float, threshold_medium: float)
     if score >= threshold_medium:
         return "MEDIUM"
     return "LOW"
+
+
+# --- Geography (USA focus) --------------------------------------------------
+
+GEO_USA = "USA"
+GEO_NON_USA = "NON_USA"
+GEO_UNKNOWN = "UNKNOWN"
+
+
+def usa_geography(text: str, us_signals: list[str], non_us_signals: list[str]) -> str:
+    """Best-effort geography tag from keyword signals.
+
+    Returns GEO_USA / GEO_NON_USA / GEO_UNKNOWN. Deliberately conservative:
+    only tags NON_USA when there are non-US signals and no US signals (and vice
+    versa), so UNKNOWN posts are never penalized.
+    """
+    if not text:
+        return GEO_UNKNOWN
+    us_hits = sum(1 for s in us_signals if count_occurrences(s, text) > 0)
+    non_us_hits = sum(1 for s in non_us_signals if count_occurrences(s, text) > 0)
+    if us_hits and not non_us_hits:
+        return GEO_USA
+    if non_us_hits and not us_hits:
+        return GEO_NON_USA
+    if us_hits and non_us_hits:
+        # Mixed — lean to whichever dominates, else unknown.
+        if us_hits >= non_us_hits:
+            return GEO_USA
+        return GEO_NON_USA
+    return GEO_UNKNOWN

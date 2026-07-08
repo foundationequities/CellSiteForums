@@ -99,3 +99,128 @@ def test_scored_post_persists_band_and_keywords(temp_db, monkeypatch):
     assert post.score > 0
     assert post.score_band in ("HIGH", "MEDIUM", "LOW")
     assert any(kw["term"] == "telecom shelter" for kw in post.matched_keywords)
+
+
+def test_competitor_mentions_are_tracked(temp_db, monkeypatch):
+    from sqlalchemy import select
+    from app import scanner
+    from app.adapters.base import RawPost
+    from app.db import Forum, Post
+
+    raw = RawPost(
+        external_id="topic-99",
+        title="Comparing telecom shelter vendors",
+        url="https://example.com/t/99",
+        body="We got quotes from Fibrebond and Sabre for a prefab telecom shelter. Thoughts?",
+        posted_at=datetime.now(timezone.utc),
+    )
+
+    class StubAdapter:
+        def __init__(self, forum, credentials=None):
+            self.forum = forum
+
+        def fetch_recent(self, since):
+            return [raw]
+
+    monkeypatch.setattr(scanner, "build_adapter", lambda forum, credentials=None: StubAdapter(forum))
+
+    with temp_db.session() as s:
+        forum = s.scalar(select(Forum).where(Forum.slug == "telecom-hall"))
+        scanner.scan_forum(s, forum)
+        post = s.scalar(select(Post).where(Post.external_id == "topic-99"))
+    assert post is not None
+    assert set(post.matched_competitors) == {"Fibrebond", "Sabre"}
+
+
+def test_topics_and_non_us_downweight(temp_db, monkeypatch):
+    from sqlalchemy import select
+    from app import scanner
+    from app.adapters.base import RawPost
+    from app.db import Forum, Post
+
+    us_raw = RawPost(
+        external_id="us-1", title="Fiber hut RFP in rural Texas (BEAD)",
+        url="https://x/us", body="Seeking a fiber hut vendor for a BEAD build in Texas. Quote please.",
+        posted_at=datetime.now(timezone.utc),
+    )
+    uk_raw = RawPost(
+        external_id="uk-1", title="Fiber hut RFP in the United Kingdom",
+        url="https://x/uk", body="Openreach project in the United Kingdom needs a fiber hut. Quote please.",
+        posted_at=datetime.now(timezone.utc),
+    )
+
+    class StubAdapter:
+        def __init__(self, forum, credentials=None):
+            self.forum = forum
+
+        def fetch_recent(self, since):
+            return [us_raw, uk_raw]
+
+    monkeypatch.setattr(scanner, "build_adapter", lambda forum, credentials=None: StubAdapter(forum))
+
+    with temp_db.session() as s:
+        forum = s.scalar(select(Forum).where(Forum.slug == "telecom-hall"))
+        scanner.scan_forum(s, forum)
+        us = s.scalar(select(Post).where(Post.external_id == "us-1"))
+        uk = s.scalar(select(Post).where(Post.external_id == "uk-1"))
+
+    assert "FIBER" in us.topics
+    assert us.geo == "USA"
+    assert uk.geo == "NON_USA"
+    # USA-only is on by default -> the non-US post is heavily down-weighted.
+    assert uk.score < us.score
+
+
+def test_reanalyze_applies_ai_and_lifts_latent_opportunity(temp_db, monkeypatch):
+    """A weak-keyword latent post is lifted once AI classifies it as an opportunity,
+    and re-analyze preserves the operator's status."""
+    from sqlalchemy import select
+    from app import scanner, drafting
+    from app.adapters.base import RawPost
+    from app.db import Forum, Post
+    from app.drafting import Classification
+
+    raw = RawPost(
+        external_id="latent-1",
+        title="County broadband authority expanding rural fiber footprint",
+        url="https://x/latent",
+        body="Ohio county broadband authority expanding its fiber network under BEAD.",
+        posted_at=datetime.now(timezone.utc),
+    )
+
+    class StubAdapter:
+        def __init__(self, forum, credentials=None):
+            self.forum = forum
+
+        def fetch_recent(self, since):
+            return [raw]
+
+    monkeypatch.setattr(scanner, "build_adapter", lambda forum, credentials=None: StubAdapter(forum))
+
+    with temp_db.session() as s:
+        forum = s.scalar(select(Forum).where(Forum.slug == "telecom-hall"))
+        scanner.scan_forum(s, forum)
+        p = s.scalar(select(Post).where(Post.external_id == "latent-1"))
+        p.status = "lead"
+        s.commit()
+        before_band = p.score_band
+
+    # Simulate AI becoming available and calling it "related".
+    monkeypatch.setattr(drafting, "ai_available", lambda: True)
+    monkeypatch.setattr(
+        drafting,
+        "classify_post",
+        lambda title, body, forum_name, context="": Classification(
+            relevant=True, confidence=0.9, one_line_summary="Latent fiber-hut demand.",
+            opportunity_type="related", is_usa=True,
+        ),
+    )
+    scanner.reanalyze_all()
+
+    with temp_db.session() as s:
+        p = s.scalar(select(Post).where(Post.external_id == "latent-1"))
+    assert before_band == "LOW"
+    assert p.opportunity_type == "related"
+    assert p.score_band in ("MEDIUM", "HIGH")
+    assert p.ai_summary == "Latent fiber-hut demand."
+    assert p.status == "lead"  # operator's mark preserved

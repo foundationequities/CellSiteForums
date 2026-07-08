@@ -1,6 +1,9 @@
 <article class="card {{ post.score_band|band_class }}" id="post-{{ post.id }}">
   <div class="card-head">
-    <span class="badge badge-{{ post.forum.category }}">{{ post.forum.category }}</span>
+    {% if post.opportunity_type in ('direct', 'related') %}<span class="badge badge-opp badge-opp-{{ post.opportunity_type }}">{{ post.opportunity_type }}</span>{% endif %}
+    {% for t in post.topics %}<span class="badge badge-{{ t }}">{{ t }}</span>{% endfor %}
+    {% if not post.topics %}<span class="badge badge-{{ post.forum.category }}">{{ post.forum.category }}</span>{% endif %}
+    {% if post.geo == 'NON_USA' %}<span class="badge badge-nonus" title="Deprioritized: not a U.S. opportunity">non-US</span>{% endif %}
     <h3>
       {% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noopener">{{ post.title }}</a>
       {% else %}{{ post.title }}{% endif %}
@@ -27,6 +30,12 @@
   {% if post.matched_keywords %}
   <div class="kw-list">
     {% for kw in post.matched_keywords %}<span class="kw">{{ kw.term }}{% if kw.count > 1 %} ×{{ kw.count }}{% endif %}</span>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if post.matched_competitors %}
+  <div class="kw-list">
+    {% for name in post.matched_competitors %}<a class="kw kw-competitor" href="/?competitor={{ name|urlencode }}">⚔ {{ name }}</a>{% endfor %}
   </div>
   {% endif %}
 

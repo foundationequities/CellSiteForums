@@ -107,3 +107,25 @@ def test_bands_configurable():
 
 def test_count_occurrences_helper():
     assert scoring.count_occurrences("fiber hut", "Fiber Hut and another fiber huts") == 2
+
+
+def test_topics_from_matched_keyword_categories():
+    kws = [KeywordSpec("fiber hut", 5, "FIBER"), KeywordSpec("telecom shelter", 5, "TOWER")]
+    r = score_text("Need a fiber hut and a telecom shelter", "", kws, [], posted_at=_fresh(0), now=NOW)
+    assert set(r.topics) == {"FIBER", "TOWER"}
+
+
+US = ["USA", "Texas", "FCC", "BEAD", "California"]
+NON_US = ["United Kingdom", "Ofcom", "Canada", "£"]
+
+
+def test_geography_usa():
+    assert scoring.usa_geography("BEAD build in rural Texas", US, NON_US) == scoring.GEO_USA
+
+
+def test_geography_non_usa():
+    assert scoring.usa_geography("An Openreach project in the United Kingdom", US, NON_US) == scoring.GEO_NON_USA
+
+
+def test_geography_unknown_when_no_signals():
+    assert scoring.usa_geography("A fiber hut for a new build", US, NON_US) == scoring.GEO_UNKNOWN

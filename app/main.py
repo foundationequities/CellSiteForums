@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -25,6 +25,7 @@ from .db import (
     Keyword,
     Post,
     Reply,
+    get_setting,
     init_db,
     load_runtime_settings,
     seed_all,
@@ -39,9 +40,11 @@ logger = logging.getLogger("forumagent")
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-CATEGORIES = ["TOWER", "FIBER", "DATA", "TRADES"]
+CATEGORIES = config.CATEGORIES  # TOWER/FIBER/DATA/E911/TRADES
 BANDS = ["HIGH", "MEDIUM", "LOW"]
 STATUSES = ["new", "reviewed", "lead", "ignored"]
+GEOS = ["USA", "NON_USA", "UNKNOWN"]
+OPPORTUNITIES = ["direct", "related", "none"]
 
 
 @asynccontextmanager
@@ -103,27 +106,43 @@ def _base_context(request: Request, db) -> dict:
         "categories": CATEGORIES,
         "bands": BANDS,
         "statuses": STATUSES,
+        "geos": GEOS,
+        "opportunities": OPPORTUNITIES,
     }
 
 
 # --- Dashboard --------------------------------------------------------------
 
 
-def _query_posts(db, *, forum_slug="", category="", band="", status="", q="", limit=200):
+def _query_posts(
+    db, *, forum_slug="", category="", band="", status="", q="", competitor="",
+    geo="", opportunity="", limit=200,
+):
     stmt = select(Post).join(Forum)
     if forum_slug:
         stmt = stmt.where(Forum.slug == forum_slug)
     if category:
-        stmt = stmt.where(Forum.category == category)
+        # Category tabs are POST-topic based (from matched keyword categories).
+        stmt = stmt.where(Post.topics_json.ilike(f'%"{category}"%'))
     if band:
         stmt = stmt.where(Post.score_band == band)
     if status:
         stmt = stmt.where(Post.status == status)
+    if competitor:
+        stmt = stmt.where(Post.matched_competitors_json.ilike(f'%"{competitor}"%'))
+    if geo:
+        stmt = stmt.where(Post.geo == geo)
+    if opportunity:
+        stmt = stmt.where(Post.opportunity_type == opportunity)
     if q:
         like = f"%{q}%"
         stmt = stmt.where((Post.title.ilike(like)) | (Post.body_excerpt.ilike(like)))
     stmt = stmt.order_by(Post.score.desc(), Post.posted_at.desc()).limit(limit)
     return db.scalars(stmt).all()
+
+
+# TRADES intentionally omitted from the stat tabs (still a valid topic/filter).
+STAT_CATEGORIES = config.TAB_CATEGORIES  # TOWER/FIBER/DATA/E911
 
 
 def _stats(db):
@@ -133,19 +152,46 @@ def _stats(db):
     # posted_at can be null for some sources; also count those via fetched_at fallback.
     total_all = db.scalar(select(func.count(Post.id))) or 0
     by_cat = {}
-    for cat in CATEGORIES:
+    for cat in STAT_CATEGORIES:
         by_cat[cat] = db.scalar(
-            select(func.count(Post.id)).join(Forum).where(Forum.category == cat)
+            select(func.count(Post.id)).where(Post.topics_json.ilike(f'%"{cat}"%'))
         ) or 0
     leads = db.scalar(select(func.count(Post.id)).where(Post.status == "lead")) or 0
     high = db.scalar(select(func.count(Post.id)).where(Post.score_band == "HIGH")) or 0
+    non_usa = db.scalar(select(func.count(Post.id)).where(Post.geo == "NON_USA")) or 0
+    by_opp = {
+        opp: db.scalar(select(func.count(Post.id)).where(Post.opportunity_type == opp)) or 0
+        for opp in ("direct", "related")
+    }
+
+    # Competitive references: count posts mentioning each tracked competitor.
+    competitors = config.load_competitors()
+    comp_counts = {
+        name: db.scalar(
+            select(func.count(Post.id)).where(Post.matched_competitors_json.ilike(f'%"{name}"%'))
+        ) or 0
+        for name in competitors
+    }
     return {
         "total_recent": total,
         "total_all": total_all,
         "by_category": by_cat,
         "leads": leads,
         "high": high,
+        "non_usa": non_usa,
+        "by_opportunity": by_opp,
+        "competitors": comp_counts,
     }
+
+
+def _last_scan_at(db) -> datetime | None:
+    raw = get_setting(db, "last_scan_at", "")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -156,17 +202,29 @@ def dashboard(
     band: str = "",
     status: str = "",
     q: str = "",
+    competitor: str = "",
+    geo: str = "",
+    opportunity: str = "",
 ):
     with session() as db:
         ctx = _base_context(request, db)
-        posts = _query_posts(db, forum_slug=forum, category=category, band=band, status=status, q=q)
+        posts = _query_posts(
+            db, forum_slug=forum, category=category, band=band, status=status, q=q,
+            competitor=competitor, geo=geo, opportunity=opportunity,
+        )
         forums = db.scalars(select(Forum).order_by(Forum.name)).all()
         ctx.update(
             {
                 "posts": posts,
                 "forums": forums,
                 "stats": _stats(db),
-                "filters": {"forum": forum, "category": category, "band": band, "status": status, "q": q},
+                "status": scanner.scan_status(),
+                "last_scan_at": _last_scan_at(db),
+                "filters": {
+                    "forum": forum, "category": category, "band": band,
+                    "status": status, "q": q, "competitor": competitor,
+                    "geo": geo, "opportunity": opportunity,
+                },
             }
         )
         return templates.TemplateResponse("dashboard.html", ctx)
@@ -180,19 +238,67 @@ def partial_posts(
     band: str = "",
     status: str = "",
     q: str = "",
+    competitor: str = "",
+    geo: str = "",
+    opportunity: str = "",
 ):
     with session() as db:
-        posts = _query_posts(db, forum_slug=forum, category=category, band=band, status=status, q=q)
+        posts = _query_posts(
+            db, forum_slug=forum, category=category, band=band, status=status, q=q,
+            competitor=competitor, geo=geo, opportunity=opportunity,
+        )
         return templates.TemplateResponse(
-            "partials/post_list.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
+            "partials/post_cards.html", {"request": request, "posts": posts, "ai_available": drafting.ai_available()}
         )
 
 
+def _compute_since(db, mode: str, days: int) -> datetime | None:
+    """Resolve the lookback start for a Scan Now request.
+
+    - ``days``: explicit last-N-days window.
+    - ``since_last``: incremental — since the last completed scan; falls back to
+      the full lookback window on the very first scan.
+    """
+    settings = load_runtime_settings(db)
+    if mode == "days" and days > 0:
+        return utcnow() - timedelta(days=days)
+    last = _last_scan_at(db)
+    if last is not None:
+        return last
+    return utcnow() - timedelta(days=settings.lookback_days)
+
+
 @app.post("/scan", response_class=HTMLResponse)
-def scan_now(request: Request):
-    summary = scanner.scan_all()
-    logger.info("Manual scan: %s new posts.", summary.total_new)
+def scan_now(request: Request, mode: str = Form("since_last"), days: int = Form(0)):
+    with session() as db:
+        since = _compute_since(db, mode, days)
+    started = scanner.start_scan(since=since)
+    logger.info("Scan requested (mode=%s, since=%s): started=%s", mode, since, started)
+    # HTMX request (dashboard panel) -> return the live status; the scan runs in
+    # the background so the browser never blocks. Plain form (header button) -> redirect.
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+        )
     return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/reanalyze", response_class=HTMLResponse)
+def reanalyze(request: Request):
+    started = scanner.start_reanalyze()
+    logger.info("Re-analyze requested: started=%s", started)
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+        )
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/partials/scan-status", response_class=HTMLResponse)
+def scan_status_partial(request: Request):
+    return templates.TemplateResponse(
+        "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+    )
 
 
 @app.post("/posts/{post_id}/status", response_class=HTMLResponse)
@@ -248,8 +354,17 @@ def scan_forum_now(forum_id: int):
 def settings_page(request: Request):
     with session() as db:
         ctx = _base_context(request, db)
-        keywords = db.scalars(select(Keyword).order_by(Keyword.is_booster, Keyword.weight.desc())).all()
-        ctx.update({"keywords": keywords})
+        keywords = db.scalars(
+            select(Keyword).order_by(Keyword.is_competitor, Keyword.is_booster, Keyword.weight.desc())
+        ).all()
+        ctx.update(
+            {
+                "keywords": keywords,
+                "ai_context": get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT),
+                "usa_only": get_setting(db, "usa_only", "1") == "1",
+                "ai_scope": get_setting(db, "ai_scope", "matched"),
+            }
+        )
         return templates.TemplateResponse("settings.html", ctx)
 
 
@@ -260,6 +375,7 @@ def save_settings(
     recency_half_life_days: int = Form(...),
     threshold_high: float = Form(...),
     threshold_medium: float = Form(...),
+    usa_only: str = Form(""),
 ):
     with session() as db:
         set_setting(db, "lookback_days", str(lookback_days))
@@ -267,16 +383,39 @@ def save_settings(
         set_setting(db, "recency_half_life_days", str(recency_half_life_days))
         set_setting(db, "threshold_high", str(threshold_high))
         set_setting(db, "threshold_medium", str(threshold_medium))
+        set_setting(db, "usa_only", "1" if usa_only else "0")
     scheduler.reschedule(scan_interval_hours)
     return RedirectResponse(url="/settings", status_code=303)
 
 
+@app.post("/settings/context")
+def save_context(ai_context: str = Form(""), ai_scope: str = Form("matched")):
+    with session() as db:
+        set_setting(db, "ai_context", ai_context.strip())
+        if ai_scope in ("matched", "medium_plus", "all"):
+            set_setting(db, "ai_scope", ai_scope)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 @app.post("/keywords/add")
-def add_keyword(term: str = Form(...), weight: float = Form(1.0), category: str = Form(""), is_booster: str = Form("")):
+def add_keyword(
+    term: str = Form(...),
+    weight: float = Form(1.0),
+    category: str = Form(""),
+    kind: str = Form("keyword"),
+):
     with session() as db:
         term = term.strip()
         if term and not db.scalar(select(Keyword).where(Keyword.term == term)):
-            db.add(Keyword(term=term, weight=weight, category=category, is_booster=bool(is_booster)))
+            db.add(
+                Keyword(
+                    term=term,
+                    weight=weight,
+                    category="COMPETITOR" if kind == "competitor" else category,
+                    is_booster=(kind == "booster"),
+                    is_competitor=(kind == "competitor"),
+                )
+            )
             db.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
@@ -498,8 +637,9 @@ def ai_draft(request: Request, post_id: int, guidance: str = Form("")):
     with session() as db:
         post = db.get(Post, post_id)
         forum = db.get(Forum, post.forum_id)
+        ai_context = get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT)
         draft = drafting.draft_reply(
-            post.title, post.body_excerpt, forum.name, forum.posting_notes, guidance
+            post.title, post.body_excerpt, forum.name, forum.posting_notes, guidance, ai_context
         )
         reply = _get_or_create_reply(db, post_id)
         reply.draft_body = draft

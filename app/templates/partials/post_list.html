@@ -1,11 +1,3 @@
-{% if posts %}
 <div class="post-list" id="post-list">
-  {% for post in posts %}
-    {% include "partials/post_card.html" %}
-  {% endfor %}
+{% include "partials/post_cards.html" %}
 </div>
-{% else %}
-<div class="empty">
-  No posts match these filters yet. Hit <strong>Scan Now</strong> to pull the last {{ settings.lookback_days if settings else 60 }} days.
-</div>
-{% endif %}

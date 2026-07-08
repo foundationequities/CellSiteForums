@@ -54,7 +54,20 @@
     { "term": "shelter vendor", "weight": 5, "category": "TOWER" },
     { "term": "shelter manufacturer", "weight": 5, "category": "TOWER" },
     { "term": "looking for shelter", "weight": 4, "category": "TOWER" },
-    { "term": "quote for shelter", "weight": 5, "category": "TOWER" }
+    { "term": "quote for shelter", "weight": 5, "category": "TOWER" },
+    { "term": "E911", "weight": 3, "category": "E911" },
+    { "term": "E-911", "weight": 3, "category": "E911" },
+    { "term": "NG911", "weight": 3, "category": "E911" },
+    { "term": "NG9-1-1", "weight": 3, "category": "E911" },
+    { "term": "next generation 911", "weight": 3, "category": "E911" },
+    { "term": "PSAP", "weight": 3, "category": "E911" },
+    { "term": "public safety answering point", "weight": 4, "category": "E911" },
+    { "term": "911 dispatch center", "weight": 3, "category": "E911" },
+    { "term": "emergency communications center", "weight": 3, "category": "E911" },
+    { "term": "ECC building", "weight": 4, "category": "E911" },
+    { "term": "emergency operations center", "weight": 2, "category": "E911" },
+    { "term": "FirstNet", "weight": 2, "category": "E911" },
+    { "term": "911 expansion", "weight": 3, "category": "E911" }
   ],
   "buying_signal_boosters": {
     "comment": "If any of these co-occur with a keyword match, add +3 to the post score.",

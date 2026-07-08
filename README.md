@@ -92,6 +92,36 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Models used: `claude-haiku-4-5` for classification, `claude-sonnet-5` for drafting.
 
+### Turning on AI and applying it to posts you already pulled
+
+1. **Get a key** at <https://console.anthropic.com> → *API Keys* → *Create key*.
+2. **Add it to `.env`** in the project root (same file as `FORUMAGENT_KEY`):
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   `.env` is gitignored — the key is never committed.
+3. **Restart the app** so it re-reads `.env`:
+   ```
+   # stop the running server (Ctrl-C), then:
+   source .venv/bin/activate
+   python -m app.main
+   ```
+   The header should now show an **“AI on”** pill.
+4. **Apply AI to the posts already in your dashboard.** A normal *Scan Now*
+   only analyzes **new** posts (it dedupes and skips ones already stored), so to
+   run AI over what you've already collected click **“Re-analyze with AI”** on
+   the dashboard scan panel. It re-scores and re-classifies every stored post in
+   the background — **without re-fetching the forums** — and **keeps your
+   Lead/Reviewed/Ignore marks**. When it finishes, the list refreshes with AI
+   summaries, opportunity types, and any rank changes.
+5. **Future scans** then classify new posts automatically as they arrive.
+
+Tip: **Settings → AI intuition & context** has an *AI analysis scope* selector.
+The default **“Matched”** runs AI on any post that hit a keyword/competitor —
+this is what lets AI catch latent leads (e.g. a fiber-footprint expansion that
+barely matches keywords) and lift them up the list. Choose **“Medium+ only”** to
+minimize API calls, or **“All fetched posts”** for maximum coverage.
+
 ---
 
 ## Discourse (Telecom Hall) posting
@@ -129,6 +159,43 @@ Bands: HIGH ≥ 12, MEDIUM ≥ 6, else LOW   (all thresholds tunable in Settings
 
 Matching is case-insensitive, word-boundary aware, with simple plural handling. Keywords
 and weights seed from `keywords.json` and are editable in **Settings** (persisted to the DB).
+
+---
+
+## Opportunity intelligence (USA focus, intuition context, E911)
+
+Beyond raw keyword scoring, the agent adds context:
+
+- **Post topics as tabs.** Every post is tagged with topics derived from the categories of
+  the keywords it matched — **TOWER / FIBER / DATA / E911** show as clickable stat tabs
+  (TRADES stays a valid topic/filter). Tabs reflect what a *post* is about, not just which
+  forum it came from. E911/NG911 dispatch-center and PSAP terms are seeded in
+  `keywords.json`.
+
+- **USA-only focus.** Each post gets a geography tag (`USA` / `NON_USA` / `UNKNOWN`). With
+  **USA only** enabled in Settings (default on), posts identified as non-U.S. are heavily
+  down-weighted, badged **non-US**, and sink to the bottom — they stay visible for
+  reference but out of your way. Detection uses a keyword geo-heuristic (US states, FCC,
+  BEAD, RDOF … vs Ofcom, Openreach, NBN, £/€ …), upgraded to an AI judgment when a key is set.
+
+- **Intuition context (Settings → AI intuition & context).** A free-text box describing your
+  ideal opportunity. When `ANTHROPIC_API_KEY` is set, this steers the AI to read each post
+  for intent and classify **opportunity type**:
+  - **direct** — explicitly seeking/spec'ing a fiber hut, telecom/equipment shelter, or
+    modular data-center building;
+  - **related** — a utility, electric co-op, ISP, carrier, or agency expanding fiber /
+    FTTH / middle-mile / small-cell / E911 infrastructure that will *likely need* a
+    structure soon, even if not stated;
+  - **none**.
+
+  The **Direct opps** and **Related opps** stat tiles and the **Opportunity** filter surface
+  these. Without an API key the app falls back to a heuristic (HIGH→direct, MEDIUM→related)
+  and the geo-heuristic above, so it still runs fully offline of any AI.
+
+The context is pre-seeded with CellSite's profile (fiber huts, telecom shelters, modular
+buildings, latent demand from fiber/utility expansion and E911) — edit it any time to
+re-focus what the agent treats as important. New context/settings apply to newly scanned
+posts, so re-scan after changing them.
 
 ---
 

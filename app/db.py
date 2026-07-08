@@ -82,6 +82,10 @@ class Post(Base):
     score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
     score_band: Mapped[str] = mapped_column(String(10), default="LOW")  # HIGH/MEDIUM/LOW
     matched_keywords_json: Mapped[str] = mapped_column(Text, default="[]")
+    matched_competitors_json: Mapped[str] = mapped_column(Text, default="[]")
+    topics_json: Mapped[str] = mapped_column(Text, default="[]")
+    geo: Mapped[str] = mapped_column(String(12), default="UNKNOWN", index=True)  # USA/NON_USA/UNKNOWN
+    opportunity_type: Mapped[str] = mapped_column(String(12), default="", index=True)  # direct/related/none
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_relevant: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="new", index=True)  # new/reviewed/lead/ignored
@@ -93,6 +97,20 @@ class Post(Base):
     def matched_keywords(self) -> list[dict[str, Any]]:
         try:
             return json.loads(self.matched_keywords_json or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    @property
+    def matched_competitors(self) -> list[str]:
+        try:
+            return json.loads(self.matched_competitors_json or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    @property
+    def topics(self) -> list[str]:
+        try:
+            return json.loads(self.topics_json or "[]")
         except json.JSONDecodeError:
             return []
 
@@ -138,6 +156,7 @@ class Keyword(Base):
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     category: Mapped[str] = mapped_column(String(20), default="")
     is_booster: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_competitor: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -177,8 +196,34 @@ def session() -> Session:
     return get_session_factory()()
 
 
+def _run_lightweight_migrations() -> None:
+    """Add columns introduced after a DB was first created (SQLite, no Alembic).
+
+    Keeps existing local databases working without a manual reset.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        post_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(posts)").fetchall()}
+        if "matched_competitors_json" not in post_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE posts ADD COLUMN matched_competitors_json TEXT DEFAULT '[]'"
+            )
+        if "topics_json" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN topics_json TEXT DEFAULT '[]'")
+        if "geo" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN geo VARCHAR(12) DEFAULT 'UNKNOWN'")
+        if "opportunity_type" not in post_cols:
+            conn.exec_driver_sql("ALTER TABLE posts ADD COLUMN opportunity_type VARCHAR(12) DEFAULT ''")
+        kw_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(keywords)").fetchall()}
+        if "is_competitor" not in kw_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE keywords ADD COLUMN is_competitor BOOLEAN DEFAULT 0"
+            )
+
+
 def init_db() -> None:
     Base.metadata.create_all(get_engine())
+    _run_lightweight_migrations()
 
 
 # --- Seeding (idempotent) ---------------------------------------------------
@@ -253,6 +298,10 @@ def seed_keywords(db: Session) -> int:
     for term in boosters:
         if db.scalar(select(Keyword).where(Keyword.term == term)) is None:
             db.add(Keyword(term=term, weight=0.0, category="", is_booster=True))
+            added += 1
+    for term in config.load_competitors():
+        if db.scalar(select(Keyword).where(Keyword.term == term)) is None:
+            db.add(Keyword(term=term, weight=0.0, category="COMPETITOR", is_competitor=True))
             added += 1
     db.commit()
     return added

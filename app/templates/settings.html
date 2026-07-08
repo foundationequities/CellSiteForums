@@ -28,14 +28,45 @@
         <input type="number" step="0.5" name="threshold_medium" value="{{ settings.threshold_medium }}">
       </div>
     </div>
+    <div class="form-row" style="margin-top:0.6rem">
+      <label class="note"><input type="checkbox" name="usa_only" value="1" {% if usa_only %}checked{% endif %}>
+        <strong>USA only</strong> — heavily down-weight posts identified as non-U.S. opportunities (they stay visible, badged "non-US", and sink to the bottom).</label>
+    </div>
     <button class="btn btn-primary" type="submit">Save settings</button>
     <span class="note">Threshold changes apply to newly scanned posts.</span>
   </form>
 </div>
 
 <div class="panel">
+  <h2>AI intuition &amp; context</h2>
+  <p class="note">
+    Describe what a good opportunity looks like for CellSite Solutions. When an
+    <span class="mono">ANTHROPIC_API_KEY</span> is set, this steers how the AI reads each post — so it can flag
+    <strong>direct</strong> demand (someone seeking a fiber hut / shelter / modular data-center building) and
+    <strong>related / latent</strong> demand (a utility or ISP expanding fiber footprint that will likely need a
+    structure) instead of relying on keywords alone. Without an API key this text is stored but not applied.
+  </p>
+  {% if not ai_available %}<div class="callout">AI is off — set <span class="mono">ANTHROPIC_API_KEY</span> to activate intuition analysis. Keyword scoring, topics, and the USA geo-heuristic still work.</div>{% endif %}
+  <form method="post" action="/settings/context">
+    <div class="form-row">
+      <label>Business context / intuition (the ideal-customer profile the AI reasons about)</label>
+      <textarea name="ai_context" style="min-height:200px">{{ ai_context }}</textarea>
+    </div>
+    <div class="form-row">
+      <label>AI analysis scope (how many posts get the AI opportunity read)</label>
+      <select name="ai_scope">
+        <option value="matched" {% if ai_scope == 'matched' %}selected{% endif %}>Matched — any post hitting a keyword/competitor (recommended; catches latent leads)</option>
+        <option value="medium_plus" {% if ai_scope == 'medium_plus' %}selected{% endif %}>Medium+ only — cheapest, fewest API calls</option>
+        <option value="all" {% if ai_scope == 'all' %}selected{% endif %}>All fetched posts — most thorough, most API calls</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" type="submit">Save context</button>
+  </form>
+</div>
+
+<div class="panel">
   <h2>Keywords <span class="note">({{ keywords|length }})</span></h2>
-  <p class="note">Seeded from <span class="mono">keywords.json</span>; edits here persist to the DB. Boosters add +3 when they co-occur with a keyword match. Matching is case-insensitive, word-boundary aware, with simple plurals.</p>
+  <p class="note">Seeded from <span class="mono">keywords.json</span> (and competitors from <span class="mono">competitors.json</span>); edits here persist to the DB. Boosters add +3 when they co-occur with a keyword match. Competitors are tracked as competitive-intel signals (shown as dashboard stats), not scored. Matching is case-insensitive, word-boundary aware, with simple plurals.</p>
 
   <form method="post" action="/keywords/add" class="filters">
     <label>Term<input type="text" name="term" required></label>
@@ -46,7 +77,13 @@
         {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
       </select>
     </label>
-    <label>Booster?<input type="checkbox" name="is_booster" value="1"></label>
+    <label>Type
+      <select name="kind">
+        <option value="keyword">keyword</option>
+        <option value="booster">booster</option>
+        <option value="competitor">competitor</option>
+      </select>
+    </label>
     <button class="btn btn-primary" type="submit">Add</button>
   </form>
 
@@ -64,7 +101,7 @@
           </form>
         </td>
         <td>{{ kw.category }}</td>
-        <td>{{ 'booster' if kw.is_booster else 'keyword' }}</td>
+        <td>{{ 'competitor' if kw.is_competitor else ('booster' if kw.is_booster else 'keyword') }}</td>
         <td>{{ 'yes' if kw.enabled else 'no' }}</td>
         <td>
           <form class="inline" method="post" action="/keywords/{{ kw.id }}/delete">

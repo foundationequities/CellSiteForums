@@ -29,6 +29,8 @@ class Classification:
     relevant: bool
     confidence: float
     one_line_summary: str
+    opportunity_type: str = ""  # "direct" | "related" | "none"
+    is_usa: bool | None = None
 
 
 def ai_available() -> bool:
@@ -42,30 +44,47 @@ def _client():
 
 
 CLASSIFIER_SYSTEM = (
-    "You classify forum/news posts for a B2B sales team at CellSite Solutions, "
-    "a manufacturer and reseller of telecom shelters, fiber huts, equipment "
-    "shelters, and modular/edge data centers. Decide whether a post is a genuine "
-    "B2B infrastructure procurement or specification discussion relevant to such "
-    "a seller (someone buying, spec'ing, sourcing, or discussing these products), "
-    "as opposed to consumer chatter, unrelated IT, or generic news. "
-    'Respond ONLY with JSON: {"relevant": bool, "confidence": 0-1 float, '
-    '"one_line_summary": string}.'
+    "You are a sales-intelligence analyst for CellSite Solutions. Read the "
+    "operator's business context, then judge whether a forum/news post is a real "
+    "opportunity — using intuition, not just keyword matching. Infer latent "
+    "demand: if an organization is expanding fiber/telecom/data-center or E911 "
+    "infrastructure, it will likely need a physical structure (fiber hut, "
+    "shelter, or modular building) even if it never says so.\n\n"
+    "Classify opportunity_type as:\n"
+    '  "direct"  = explicitly seeking/spec\'ing/sourcing a hut, shelter, or '
+    "modular data-center building;\n"
+    '  "related" = a utility/co-op/ISP/carrier/agency expanding infrastructure '
+    "that likely needs such a structure soon;\n"
+    '  "none"    = not a real opportunity.\n'
+    "Also judge geography: is the opportunity in the United States? "
+    "(is_usa true/false; use false only when clearly non-U.S.)\n\n"
+    'Respond ONLY with JSON: {"relevant": bool, "opportunity_type": '
+    '"direct"|"related"|"none", "is_usa": bool, "confidence": 0-1 float, '
+    '"one_line_summary": string}. The summary must say WHY it is (or is not) an '
+    "opportunity in one line."
 )
 
 
-def classify_post(title: str, body: str, forum_name: str) -> Classification | None:
-    """Classify a post's relevance via Claude. Returns None if AI unavailable/fails."""
+def classify_post(
+    title: str, body: str, forum_name: str, context: str = ""
+) -> Classification | None:
+    """Classify a post's opportunity via Claude. Returns None if AI unavailable/fails.
+
+    ``context`` is the operator's editable business/"intuition" context.
+    """
     if not ai_available():
         return None
     try:
         client = _client()
+        ctx = context.strip() or "(no extra context provided)"
         prompt = (
-            f"Forum: {forum_name}\nTitle: {title}\n\nBody:\n{body[:2000]}\n\n"
-            "Classify this post."
+            f"BUSINESS CONTEXT / INTUITION:\n{ctx}\n\n"
+            f"POST\nForum: {forum_name}\nTitle: {title}\n\nBody:\n{body[:2500]}\n\n"
+            "Analyze this post."
         )
         resp = client.messages.create(
             model=CLASSIFIER_MODEL,
-            max_tokens=300,
+            max_tokens=400,
             system=CLASSIFIER_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -73,10 +92,16 @@ def classify_post(title: str, body: str, forum_name: str) -> Classification | No
         data = _extract_json(text)
         if data is None:
             return None
+        opp = str(data.get("opportunity_type", "")).strip().lower()
+        if opp not in ("direct", "related", "none"):
+            opp = ""
+        is_usa = data.get("is_usa")
         return Classification(
             relevant=bool(data.get("relevant", False)),
             confidence=float(data.get("confidence", 0.0)),
             one_line_summary=str(data.get("one_line_summary", "")).strip(),
+            opportunity_type=opp,
+            is_usa=bool(is_usa) if isinstance(is_usa, bool) else None,
         )
     except Exception:  # noqa: BLE001 - AI is best-effort; never break a scan
         return None
@@ -101,6 +126,7 @@ def draft_reply(
     forum_name: str,
     posting_notes: str = "",
     guidance: str = "",
+    context: str = "",
 ) -> str:
     """Generate a reply draft. AI if available, else a helpful manual template."""
     if not ai_available():
@@ -109,8 +135,9 @@ def draft_reply(
         client = _client()
         notes = f"\nForum posting rules to respect: {posting_notes}" if posting_notes else ""
         extra = f"\nOperator guidance: {guidance}" if guidance else ""
+        ctx = f"\nBusiness context: {context.strip()}" if context.strip() else ""
         prompt = (
-            f"Forum: {forum_name}{notes}{extra}\n\n"
+            f"Forum: {forum_name}{notes}{ctx}{extra}\n\n"
             f"Post title: {title}\n\nPost body:\n{body[:2500]}\n\n"
             "Write a helpful reply."
         )
