@@ -283,6 +283,17 @@ def scan_now(request: Request, mode: str = Form("since_last"), days: int = Form(
     return RedirectResponse(url="/", status_code=303)
 
 
+@app.post("/reanalyze", response_class=HTMLResponse)
+def reanalyze(request: Request):
+    started = scanner.start_reanalyze()
+    logger.info("Re-analyze requested: started=%s", started)
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            "partials/scan_status.html", {"request": request, "status": scanner.scan_status()}
+        )
+    return RedirectResponse(url="/", status_code=303)
+
+
 @app.get("/partials/scan-status", response_class=HTMLResponse)
 def scan_status_partial(request: Request):
     return templates.TemplateResponse(
@@ -351,6 +362,7 @@ def settings_page(request: Request):
                 "keywords": keywords,
                 "ai_context": get_setting(db, "ai_context", config.DEFAULT_AI_CONTEXT),
                 "usa_only": get_setting(db, "usa_only", "1") == "1",
+                "ai_scope": get_setting(db, "ai_scope", "matched"),
             }
         )
         return templates.TemplateResponse("settings.html", ctx)
@@ -377,9 +389,11 @@ def save_settings(
 
 
 @app.post("/settings/context")
-def save_context(ai_context: str = Form("")):
+def save_context(ai_context: str = Form(""), ai_scope: str = Form("matched")):
     with session() as db:
         set_setting(db, "ai_context", ai_context.strip())
+        if ai_scope in ("matched", "medium_plus", "all"):
+            set_setting(db, "ai_scope", ai_scope)
     return RedirectResponse(url="/settings", status_code=303)
 
 

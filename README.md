@@ -92,6 +92,36 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Models used: `claude-haiku-4-5` for classification, `claude-sonnet-5` for drafting.
 
+### Turning on AI and applying it to posts you already pulled
+
+1. **Get a key** at <https://console.anthropic.com> → *API Keys* → *Create key*.
+2. **Add it to `.env`** in the project root (same file as `FORUMAGENT_KEY`):
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   `.env` is gitignored — the key is never committed.
+3. **Restart the app** so it re-reads `.env`:
+   ```
+   # stop the running server (Ctrl-C), then:
+   source .venv/bin/activate
+   python -m app.main
+   ```
+   The header should now show an **“AI on”** pill.
+4. **Apply AI to the posts already in your dashboard.** A normal *Scan Now*
+   only analyzes **new** posts (it dedupes and skips ones already stored), so to
+   run AI over what you've already collected click **“Re-analyze with AI”** on
+   the dashboard scan panel. It re-scores and re-classifies every stored post in
+   the background — **without re-fetching the forums** — and **keeps your
+   Lead/Reviewed/Ignore marks**. When it finishes, the list refreshes with AI
+   summaries, opportunity types, and any rank changes.
+5. **Future scans** then classify new posts automatically as they arrive.
+
+Tip: **Settings → AI intuition & context** has an *AI analysis scope* selector.
+The default **“Matched”** runs AI on any post that hit a keyword/competitor —
+this is what lets AI catch latent leads (e.g. a fiber-footprint expansion that
+barely matches keywords) and lift them up the list. Choose **“Medium+ only”** to
+minimize API calls, or **“All fetched posts”** for maximum coverage.
+
 ---
 
 ## Discourse (Telecom Hall) posting

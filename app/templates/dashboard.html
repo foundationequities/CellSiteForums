@@ -40,6 +40,11 @@
     <label class="radio"><input type="radio" name="mode" value="days"> Last
       <input type="number" name="days" value="{{ settings.lookback_days }}" min="1" max="3650" style="width:5rem"> days</label>
     <button class="btn btn-primary" type="submit">Scan Now</button>
+    <button class="btn" type="button"
+            hx-post="/reanalyze" hx-target="#scan-status-box" hx-swap="outerHTML"
+            title="Re-score and re-run AI opportunity analysis on posts already stored — no re-fetch, keeps your Lead/status marks. Use after adding an API key or editing the intuition context.">
+      Re-analyze with AI
+    </button>
   </form>
   {% include "partials/scan_status.html" %}
 </div>

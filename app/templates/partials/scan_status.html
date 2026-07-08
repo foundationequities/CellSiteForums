@@ -6,15 +6,25 @@
 <div id="scan-status-box"
      {% if status.running %}hx-get="/partials/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
   {% if status.running %}
+    {% if status.label == 'reanalyze' %}
+    <span class="pill pill-muted">⏳ Re-analyzing stored posts…</span>
+    <span class="note">started {{ status.started_at|dt }} · running in the background (AI analysis can take a while; you can keep using the app)</span>
+    {% else %}
     <span class="pill pill-muted">⏳ Scanning…</span>
     <span class="note">started {{ status.started_at|dt }} · running in the background (a full scan can take a few minutes; you can keep using the app)</span>
+    {% endif %}
   {% elif status.finished_at %}
     {% if status.error %}
-      <span class="pill" style="color:var(--high);border-color:var(--high)">Scan error</span>
+      <span class="pill" style="color:var(--high);border-color:var(--high)">{{ 'Re-analyze' if status.label == 'reanalyze' else 'Scan' }} error</span>
       <span class="note">{{ status.error }}</span>
     {% else %}
+      {% if status.label == 'reanalyze' %}
+      <span class="pill pill-ok">✓ Re-analyze complete</span>
+      <span class="note">{{ status.new_posts }} posts re-scored · finished {{ status.finished_at|dt }}</span>
+      {% else %}
       <span class="pill pill-ok">✓ Scan complete</span>
       <span class="note">{{ status.new_posts }} new · {{ status.fetched }} fetched · finished {{ status.finished_at|dt }}</span>
+      {% endif %}
       <a class="btn btn-sm" href="/">View results</a>
       {# refresh the visible post list once, without a full reload #}
       <span hx-get="/partials/posts" hx-target="#post-list" hx-trigger="load" hx-swap="innerHTML" style="display:none"></span>

@@ -52,6 +52,14 @@
       <label>Business context / intuition (the ideal-customer profile the AI reasons about)</label>
       <textarea name="ai_context" style="min-height:200px">{{ ai_context }}</textarea>
     </div>
+    <div class="form-row">
+      <label>AI analysis scope (how many posts get the AI opportunity read)</label>
+      <select name="ai_scope">
+        <option value="matched" {% if ai_scope == 'matched' %}selected{% endif %}>Matched — any post hitting a keyword/competitor (recommended; catches latent leads)</option>
+        <option value="medium_plus" {% if ai_scope == 'medium_plus' %}selected{% endif %}>Medium+ only — cheapest, fewest API calls</option>
+        <option value="all" {% if ai_scope == 'all' %}selected{% endif %}>All fetched posts — most thorough, most API calls</option>
+      </select>
+    </div>
     <button class="btn btn-primary" type="submit">Save context</button>
   </form>
 </div>
